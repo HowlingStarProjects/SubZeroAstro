@@ -1126,7 +1126,8 @@ def with_stars(masters: list, stars_images: dict, screen: bool = False) -> list:
             continue
         if screen:
             top = float(max(65535.0, np.nanmax(m.data), np.nanmax(sd)))
-            data = top * (1.0 - (1.0 - np.clip(m.data, 0, None) / top) * (1.0 - np.clip(sd, 0, None) / top))
+            a_, b_ = np.clip(m.data, 0, None).astype(np.float64), np.clip(sd, 0, None).astype(np.float64)
+            data = top * (1.0 - (1.0 - a_ / top) * (1.0 - b_ / top))
         else:
             data = m.data + sd
         out.append(type(m)(**{**m.__dict__, "data": data.astype(np.float32)}))
