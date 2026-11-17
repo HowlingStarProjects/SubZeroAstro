@@ -189,8 +189,13 @@ class OrganizeDialog(QDialog):
         self.b_stop = QPushButton("Stop")
         self.b_stop.setVisible(False)
         self.b_stop.clicked.connect(lambda: setattr(self.job, "stop", True) if self.job else None)
+        self.b_refresh = QPushButton("↻ Refresh")
+        self.b_refresh.setToolTip("Brings the window up to date: the Organize Automatically note and last run, and - "
+                                  "once you've looked through a folder - Step 1 again, so the list shows what's in "
+                                  "the folder now (e.g. after new subs came in). Nothing is moved.")
+        self.b_refresh.clicked.connect(lambda: self.refresh())
         for b in (self.b_rigs, self.b_scan, self.b_which, self.b_dups, self.b_go, self.b_safe, self.b_undo,
-                  self.b_stop):
+                  self.b_refresh, self.b_stop):
             h.addWidget(b)
         h.addStretch(1)
         lay.addLayout(h)
@@ -434,8 +439,27 @@ class OrganizeDialog(QDialog):
         self._show_auto_note()
         return d
 
+    def refresh(self, wait=False):
+        """↻ Refresh: the Organize Automatically note and last-run line from the settings (an automatic run, a fetch
+        or the N.I.N.A. clean-up may have happened while the window was open), then - if a folder was looked
+        through already - Step 1 again on it, so the list is what's there now. Reads only."""
+        self._show_auto_note()
+        last = self.settings.value("organize/last_done", "") or ""
+        looked = bool(self.items) or self._organized
+        srcs = [p for p in self.sources() if p.exists()]
+        if looked and srcs:
+            self.scan(wait=wait)
+            return True
+        t = f"Refreshed {time.strftime('%H:%M')}."
+        if last:
+            t += f"<br><i>Last time: {last}</i>"
+        if not looked:
+            t += "<br>Pick a folder and Step 1 – Look Through the Files to see what's in it."
+        self.status.setText(t)
+        return False
+
     def _busy(self, on):
-        for w in (self.b_scan, self.b_rigs, self.b_which, self.b_go, self.b_dups, self.b_safe, self.b_undo,
+        for w in (self.b_scan, self.b_rigs, getattr(self, "b_refresh", self.b_scan), self.b_which, self.b_go, self.b_dups, self.b_safe, self.b_undo,
                   getattr(self, "b_resort", self.b_undo), getattr(self, "b_auto", self.b_undo), self.src,
                   self.dst,
                   self.same,

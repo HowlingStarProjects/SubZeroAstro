@@ -43,8 +43,10 @@ class AsiairDialog(QDialog):
             "or a Mac's mounted share (Browse…) works too.")
         intro.setWordWrap(True)
         lay.addWidget(intro)
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Name", "IP address or folder", "Rig", "Last fetch"])
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["Name", "IP address or folder", "Rig", "Last fetch", "Right now"])
+        self.table.horizontalHeaderItem(4).setToolTip("Refresh checks each ASIAIR: can it be reached, and how many "
+                                                      "subs are waiting to be fetched")
         self.table.verticalHeader().setVisible(False)
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -100,6 +102,11 @@ class AsiairDialog(QDialog):
         h = QHBoxLayout()
         self.b_fetch = QPushButton("Fetch Now")
         self.b_fetch.clicked.connect(lambda: self.fetch_now())
+        self.b_refresh = QPushButton("↻ Refresh")
+        self.b_refresh.setToolTip("Brings the window up to date: each ASIAIR's Last fetch (also the overnight "
+                                  "rounds), and whether each one can be reached right now and how many new subs it "
+                                  "has waiting. Copies nothing.")
+        self.b_refresh.clicked.connect(lambda: self.refresh())
         self.b_stop = QPushButton("Stop")
         self.b_stop.setVisible(False)
         self.b_stop.clicked.connect(self._stop)
@@ -110,6 +117,7 @@ class AsiairDialog(QDialog):
         b_close = QPushButton("Save && Close")
         b_close.clicked.connect(self.accept)
         h.addWidget(self.b_fetch)
+        h.addWidget(self.b_refresh)
         h.addWidget(self.b_pause)
         h.addWidget(self.b_stop)
         h.addStretch(1)
@@ -146,6 +154,9 @@ class AsiairDialog(QDialog):
         last = QTableWidgetItem(u.get("last") or "")
         last.setFlags(last.flags() & ~Qt.ItemIsEditable)
         self.table.setItem(r, 3, last)
+        now = QTableWidgetItem("")
+        now.setFlags(now.flags() & ~Qt.ItemIsEditable)
+        self.table.setItem(r, 4, now)
         return r
 
     def remove_row(self):
@@ -301,8 +312,61 @@ class AsiairDialog(QDialog):
                 QApplication.processEvents()
         return self.job
 
+    def refresh(self, wait=False):
+        """↻ Refresh: Last fetch and the status line from what was saved (the overnight rounds and Organize
+        Automatically fetch while this window is open), then each ASIAIR checked in the background - reachable,
+        and how many new subs are waiting. Copies nothing."""
+        saved = {A.safe_name(u.get("name") or u.get("address") or ""): u for u in A.load_units(self.settings)}
+        for row in range(self.table.rowCount()):
+            it = self.table.item(row, 0)
+            u = saved.get(A.safe_name(it.text() if it else ""))
+            if u is not None and self.table.item(row, 3) is not None:
+                self.table.item(row, 3).setText(u.get("last") or "")
+        last = self.settings.value("asiair/last", "") or ""
+        if last:
+            self.status.setText(last)
+        if self.job is not None and self.job.isRunning():
+            return None                                 # a fetch is running: its own progress is the news
+        units = self.units()
+        if not any(u["address"] for u in units):
+            self.status.setText("Add an ASIAIR and its IP address, then Refresh.")
+            return None
+        for row in range(self.table.rowCount()):
+            if self.table.item(row, 4) is not None:
+                self.table.item(row, 4).setText("checking…")
+        from organizer_window import _Job
+        job = _Job(lambda j: A.check(units, stop=lambda: j.stop))
+        self.refresh_job = job
+        self.b_refresh.setEnabled(False)
+
+        def done(reps):
+            self.b_refresh.setEnabled(True)
+            self.refresh_results = reps
+            by = {A.safe_name(r["name"]): r for r in reps}
+            for row in range(self.table.rowCount()):
+                it = self.table.item(row, 0)
+                r = by.get(A.safe_name(it.text() if it else ""))
+                if self.table.item(row, 4) is not None:
+                    self.table.item(row, 4).setText(A.now_text(r) if r else "")
+            waiting = sum(r.get("new", 0) for r in reps)
+            self.status.setText(f"Refreshed {time.strftime('%H:%M')}: {sum(1 for r in reps if r['reachable'])} of "
+                                f"{len(reps)} ASIAIR(s) reachable, {waiting} new sub(s) waiting"
+                                + (" - Fetch Now copies them." if waiting else "."))
+        job.ok.connect(done)
+        job.failed.connect(lambda e: (self.b_refresh.setEnabled(True),
+                                      self.status.setText("Refresh stopped: " + e.split("\n")[0])))
+        job.start()
+        if wait:
+            while job.isRunning():
+                QApplication.processEvents()
+                job.wait(20)
+            for _ in range(5):
+                QApplication.processEvents()
+        return job
+
     def _busy(self, on):
         self.b_fetch.setEnabled(not on)
+        self.b_refresh.setEnabled(not on)
         self.b_stop.setVisible(on)
         self.b_pause.setVisible(on)
         self.b_pause.setText("Pause")

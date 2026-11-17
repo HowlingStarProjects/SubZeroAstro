@@ -1112,6 +1112,27 @@ def resume_point(cps: PrepareCheckpoints, plan: list) -> int:
     return n
 
 
+def with_stars(masters: list, stars_images: dict, screen: bool = False) -> list:
+    """The masters with StarXTerminator's stars put back, for previews and the quick look only (the saved
+    masters stay starless, with their stars in *_stars files for page 4). Added back - stars were made as
+    original minus starless - or screened back when 'Unscreen Stars' made them for a screen blend."""
+    if not stars_images:
+        return masters
+    out = []
+    for i, m in enumerate(masters):
+        sd = stars_images.get(i)
+        if sd is None or sd.shape != m.data.shape:
+            out.append(m)
+            continue
+        if screen:
+            top = float(max(65535.0, np.nanmax(m.data), np.nanmax(sd)))
+            data = top * (1.0 - (1.0 - np.clip(m.data, 0, None) / top) * (1.0 - np.clip(sd, 0, None) / top))
+        else:
+            data = m.data + sd
+        out.append(type(m)(**{**m.__dict__, "data": data.astype(np.float32)}))
+    return out
+
+
 def preview_rgb8(masters: list, palette=None, max_side=1400):
     """Small auto-stretched colour preview of a set (what the window shows)."""
     try:
@@ -1210,6 +1231,7 @@ def run_prepare(masters: list, opts: PrepareOptions, progress=None, log=None, ca
            "into a hard disc with a ring), and StarXTerminator is left out (it takes the inner coma for a star)")
     cps = PrepareCheckpoints([m.path for m in masters], target) if opts.checkpoints else None
     stars_images = {}                      # master index -> stars-only image (StarXTerminator)
+    screened = bool(((opts.xt or {}).get("sxt") or {}).get("values", {}).get("unscreen"))   # stars for a screen blend
     start = 0
     if cps is not None:
         start = resume_point(cps, plan)
@@ -1362,7 +1384,7 @@ def run_prepare(masters: list, opts: PrepareOptions, progress=None, log=None, ca
         rgb_step = None
         if step_preview is not None or cps is not None:
             try:
-                rgb_step = preview_rgb8(masters, opts.palette)
+                rgb_step = preview_rgb8(with_stars(masters, stars_images, screened), opts.palette)
             except Exception:  # noqa: BLE001 - a preview never stops the run
                 rgb_step = None
         if step_preview is not None and rgb_step is not None:
@@ -1372,7 +1394,8 @@ def run_prepare(masters: list, opts: PrepareOptions, progress=None, log=None, ca
             detail = "; ".join(t for _k, t in masters[0].steps[before:]) or STEP_TITLES[step]
             try:
                 cps.save(step, sig, detail, masters, stars_images,
-                         rgb_step if rgb_step is not None else preview_rgb8(masters, opts.palette))
+                         rgb_step if rgb_step is not None else
+                         preview_rgb8(with_stars(masters, stars_images, screened), opts.palette))
             except OSError as e:            # e.g. disk full - keep going without checkpoints
                 lg(f"Could not save progress ({e}) — continuing without checkpoints")
                 cps.truncate(len(cps.steps))
@@ -1410,7 +1433,7 @@ def run_prepare(masters: list, opts: PrepareOptions, progress=None, log=None, ca
         pal = opts.palette or (palettes_for(masters) or [None])[0]
         if pal:
             pr(f"Quick-look image ({pal})", 0.92)
-            rgb = quick_look(masters, pal)
+            rgb = quick_look(with_stars(masters, stars_images, screened), pal)     # the whole picture, stars in
             stem = f"{target}_{re.sub(r'[^A-Za-z0-9]+', '', pal.split(' ')[0])}_quicklook"
             if "tif" in img_fmts or "tiff" in img_fmts:
                 tif = out_dir / f"{stem}.tif"

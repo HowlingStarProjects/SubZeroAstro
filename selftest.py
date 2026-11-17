@@ -2622,6 +2622,18 @@ def run(app, out_dir: Path) -> int:
         check(_pwm.xt_start_values("nxt", {"dn": 0.0})["dn"] == 0.6 and _pwm.xt_start_values("nxt", {})["dn"] == 0.6
               and _pwm.xt_start_values("nxt", {"dn": 0.8})["dn"] == 0.8,
               "NoiseXTerminator never starts at 0 (typical 0.6), a chosen value is kept")
+        import prepare as _wsP
+        _ws_m = _wsP.Master(path=Path("x.fits"), data=np.full((1, 4, 4), 100.0, np.float32), cards=[], look={},
+                            target="T", filter="Ha", alignref=None, autocrop=None)
+        _ws_s = {0: np.full((1, 4, 4), 50.0, np.float32)}
+        _ws_add = _wsP.with_stars([_ws_m], _ws_s)[0].data
+        _ws_scr = _wsP.with_stars([_ws_m], _ws_s, screen=True)[0].data
+        _ws_top = 65535.0
+        _ws_exp = _ws_top * (1 - (1 - 100 / _ws_top) * (1 - 50 / _ws_top))
+        check(np.allclose(_ws_add, 150) and np.allclose(_ws_scr, _ws_exp) and np.allclose(_ws_m.data, 100)
+              and _wsP.with_stars([_ws_m], {})[0] is _ws_m,
+              "page 3: the last picture (after StarXTerminator) and the quick look show the stars put back - added, "
+              "or screened with Unscreen Stars - while the saved master stays starless")
         if res:
             names = sorted(Path(f).name for f in res[0]["files"])
             log("prepared: " + ", ".join(names))
@@ -4623,8 +4635,16 @@ def run(app, out_dir: Path) -> int:
         _owin.same.setChecked(True)
         _owin.set_sources([_od / "dump" / "sub", _od / "dump"])        # several folders at once
         _owin.move.setChecked(True)
+        _owin_r0 = _owin.refresh()                       # nothing looked through yet: notes only
         _owin.scan(wait=True)
         _on = len([i for i in _owin.items if i.status == "move"])
+        _owin_n0 = len(_owin.items)
+        _owin.items = []
+        _owin._organized = True                          # as after Step 3: Refresh looks through the folder again
+        _owin_r1 = _owin.refresh(wait=True)
+        check(_owin_r0 is False and _owin_r1 is True and len(_owin.items) == _owin_n0 and _owin_n0 > 0,
+              f"Organize › Refresh: notes reloaded, and Step 1 run again once a folder was looked through "
+              f"({len(_owin.items)} of {_owin_n0} files)")
         _odd = _owin.open_duplicates()
         _odn = _odd.table.rowCount() if _odd else 0
         _odd.act(True, ask=False, wait=True)
@@ -5100,6 +5120,21 @@ def run(app, out_dir: Path) -> int:
         check(_as_lu and _as_lu[0]["last"] == "2026-11-12 21:35: 3 new" and _as_lt == ["2026-11-12 21:45: not reached"]
               and _as_d.table.item(0, 3).text() == "2026-11-12 22:00: 5 new",
               f"Fetch From My ASIAIRs: every fetch round, overnight ones too, updates each ASIAIR's Last fetch ({_as_lt})")
+        # ↻ Refresh: Last fetch reloaded from what was saved, each ASIAIR checked - reachable, new subs waiting
+        (_as_sh / "Light_M31_300.0s_0003.fit").write_bytes(b"x" * 64)
+        os.utime(_as_sh / "Light_M31_300.0s_0003.fit", (_as_old, _as_old))
+        _as_d.refresh(wait=True)
+        _as_rr = getattr(_as_d, "refresh_results", None) or []
+        _as_now = _as_d.table.item(0, 4).text() if _as_d.table.item(0, 4) else ""
+        _as_d.table.item(0, 1).setText(str(_au_root / "no_such_air"))
+        _as_d.refresh(wait=True)
+        _as_now2 = _as_d.table.item(0, 4).text()
+        _as_d.table.item(0, 1).setText(str(_as_root / "EMMC Images"))
+        check(_as_d.table.item(0, 3).text() == "2026-11-12 21:45: not reached" and _as_rr
+              and _as_rr[0]["reachable"] and _as_rr[0]["new"] == 1 and "1 new sub waiting" in _as_now
+              and _as_now2 == "can't reach it" and _as_sh.joinpath("Light_M31_300.0s_0003.fit").exists(),
+              f"Fetch From My ASIAIRs › Refresh: Last fetch reloaded, each ASIAIR checked ({_as_now} / {_as_now2}), "
+              f"nothing copied")
         _as_ps = _au_root / "pause_air" / "EMMC Images" / "Autorun"
         _as_ps.mkdir(parents=True, exist_ok=True)
         for _as_k in range(2):

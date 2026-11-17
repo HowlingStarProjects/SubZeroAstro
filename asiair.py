@@ -291,6 +291,36 @@ def describe(reps) -> str:
     return "\n".join(out) if out else "No ASIAIRs set up."
 
 
+def check(units, stop=None) -> list:
+    """Refresh: is each ASIAIR reachable right now, and how many of its subs aren't fetched yet? Reads only.
+    [{name, reachable, subs, new}]"""
+    out = []
+    for u in units:
+        if stop and stop():
+            break
+        name = u.get("name") or u.get("address") or ""
+        rep = {"name": name, "reachable": False, "subs": 0, "new": 0}
+        try:
+            roots = shares(u.get("address") or "") if (u.get("address") or "").strip() else []
+            if roots:
+                subs = scan(roots, stop=stop)
+                seen = load_manifest(safe_name(name))
+                rep.update(reachable=True, subs=len(subs),
+                           new=sum(1 for s in subs if not _seen(seen, s[1], s[2], s[3], s[0])))
+        except OSError:
+            pass
+        out.append(rep)
+    return out
+
+
+def now_text(rep) -> str:
+    """What the Right now column shows after Refresh."""
+    if not rep.get("reachable"):
+        return "can't reach it"
+    n = rep.get("new", 0)
+    return f"reachable - {n} new sub{'s' if n != 1 else ''} waiting" if n else "reachable - nothing new"
+
+
 def load_units(settings) -> list:
     try:
         v = json.loads(settings.value("asiair/list", "[]") or "[]")
