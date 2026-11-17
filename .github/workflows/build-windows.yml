@@ -192,11 +192,14 @@ jobs:
 
   build-mac:
     # The same app for Macs with Apple silicon (M1/M2/M3/M4), built and self-tested on a real Mac.
-    # Unsigned for now: the first time, right-click SubZeroAstro.app > Open (see the README).
+    # Releases are signed with the Developer ID certificate and notarized by Apple when the MACOS_* / APPLE_*
+    # secrets are set; if anything with Apple fails, the release still goes out with the old ad-hoc signature.
     needs: build
     if: always()
     runs-on: macos-15                # macos-14 is retired on 2026-11-02 (brownouts before that cancel its jobs)
-    timeout-minutes: 60
+    timeout-minutes: 90
+    env:
+      MAC_SIGN: ${{ secrets.MACOS_CERT_P12 != '' && secrets.APPLE_APP_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -256,6 +259,62 @@ jobs:
           plutil -lint $PL
           codesign --force --deep --sign - dist/SubZeroAstro.app   # ad-hoc signature (needed on Apple silicon)
 
+      - name: Sign and notarize SubZeroAstro.app (Developer ID)
+        id: macsign
+        if: env.MAC_SIGN == 'true' && (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag != '')
+        continue-on-error: true           # a signing / notarization problem never stops a release
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APP=dist/SubZeroAstro.app
+          KC="$RUNNER_TEMP/sza-signing.keychain-db"
+          KP=$(openssl rand -hex 16)
+          printf '%s' "$MACOS_CERT_P12" | tr -d ' \r\n' | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KP" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KP" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KC"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KP" "$KC" > /dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          ID=$(security find-identity -v -p codesigning "$KC" | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.*)"/\1/')
+          if [ -z "$ID" ]; then echo "No Developer ID Application identity in MACOS_CERT_P12"; exit 1; fi
+          echo "Signing as: $ID"
+          ENT=assets/macos/entitlements.plist
+          # every piece of code inside first (libraries, Python extensions, Qt), then the app itself
+          find "$APP/Contents" -type f -print0 | while IFS= read -r -d '' f; do
+            if file -b "$f" | grep -q "Mach-O" && [ "$f" != "$APP/Contents/MacOS/SubZeroAstro" ]; then
+              codesign --force --timestamp --options runtime --sign "$ID" "$f"
+            fi
+          done
+          codesign --force --deep --timestamp --options runtime --entitlements "$ENT" --sign "$ID" "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          # notarization: Apple checks the app (a few minutes), then the ticket is stapled to it
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait --timeout 45m --output-format json > "$RUNNER_TEMP/nt.json" || true
+          cat "$RUNNER_TEMP/nt.json"
+          NID=$(python3 -c "import json;print(json.load(open('$RUNNER_TEMP/nt.json')).get('id',''))" || true)
+          NST=$(python3 -c "import json;print(json.load(open('$RUNNER_TEMP/nt.json')).get('status',''))" || true)
+          if [ "$NST" != "Accepted" ]; then
+            echo "Notarization: ${NST:-no answer}"
+            [ -n "$NID" ] && xcrun notarytool log "$NID" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_APP_PASSWORD" || true
+            exit 1
+          fi
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          spctl --assess --type execute --verbose=4 "$APP"
+
+      - name: Back to the ad-hoc signature (signing or notarization failed)
+        if: steps.macsign.outcome == 'failure'
+        run: codesign --force --deep --sign - dist/SubZeroAstro.app
+
       - name: Self-test (the built app)
         run: |
           dist/SubZeroAstro.app/Contents/MacOS/SubZeroAstro --selftest "$PWD/selftest_mac_app"
@@ -294,4 +353,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
-        run: gh release upload "$TAG" SubZeroAstro-macOS-AppleSilicon.zip docs/SubZeroAstro_User_Manual.pdf --clobber
+          MACSIGNED: ${{ steps.macsign.outcome }}
+        run: |
+          gh release upload "$TAG" SubZeroAstro-macOS-AppleSilicon.zip docs/SubZeroAstro_User_Manual.pdf --clobber
+          if [ "$MACSIGNED" = "success" ]; then
+            BODY=$(gh release view "$TAG" --json body -q .body)
+            printf '%s\n\nThe Mac app is signed by the publisher Brian Poteet and notarized by Apple: unzip it and double-click SubZeroAstro.app.\n' "$BODY" > "$RUNNER_TEMP/notes.md"
+            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
