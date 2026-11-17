@@ -297,10 +297,13 @@ jobs:
           # notarization: Apple checks the app (a few minutes), then the ticket is stapled to it
           ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
           xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_PASSWORD" --wait --timeout 45m --output-format json > "$RUNNER_TEMP/nt.json" || true
+            --password "$APPLE_APP_PASSWORD" --wait --timeout 45m --output-format json > "$RUNNER_TEMP/nt.json" 2>&1 || true
           cat "$RUNNER_TEMP/nt.json"
-          NID=$(python3 -c "import json;print(json.load(open('$RUNNER_TEMP/nt.json')).get('id',''))" || true)
-          NST=$(python3 -c "import json;print(json.load(open('$RUNNER_TEMP/nt.json')).get('status',''))" || true)
+          # notarytool answers with one JSON object (on stdout, or stderr for a timeout) - read whichever came
+          NJS='import json,re,sys;t=open(sys.argv[1]).read();m=re.findall(r"\{.*\}",t);d=json.loads(m[-1]) if m else {};print(d.get(sys.argv[2],""))'
+          NID=$(python3 -c "$NJS" "$RUNNER_TEMP/nt.json" id || true)
+          NST=$(python3 -c "$NJS" "$RUNNER_TEMP/nt.json" status || true)
+          # Apple's first check of a brand-new developer account can take hours; later ones a few minutes
           if [ "$NST" != "Accepted" ]; then
             echo "Notarization: ${NST:-no answer}"
             [ -n "$NID" ] && xcrun notarytool log "$NID" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
