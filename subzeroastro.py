@@ -45,7 +45,7 @@ from chart import ChartPoint, SessionChart, filter_color
 
 APP_NAME = "SubZeroAstro"
 APP_TAGLINE = "From subs to masters - zero hassle."
-APP_VERSION = "0.9.283 beta"
+APP_VERSION = "0.9.284 beta"
 ORGANIZER_ENABLED = True       # File › Organize My Astro Files…
 ui_header.APP_VERSION = APP_VERSION       # shown in small print under the name on every page
 APP_AUTHOR = "Brian A. Poteet, DVM"
@@ -1288,6 +1288,10 @@ class MainWindow(QMainWindow):
         self.act_set_filter = act("Set Filter Name…", self.set_filter_dialog, None, None,
                                   "Tell SubZeroAstro which filter was used, for the selected frames or all frames "
                                   "(when the camera didn't record it). Your files are not changed.")
+        self.act_filter_id = act("Identify Filter…", self.open_filter_id, None, None,
+                                 "Filter Identifier: works out which filter the selected frames (or all frames) were "
+                                 "taken through from the picture itself - for a filter drawer the camera knew nothing "
+                                 "about")
         self.act_edit_headers = act("Edit FITS Headers…", self.edit_headers_dialog, "Ctrl+Shift+H", None,
                                     "Change header keywords (OBJECT, FILTER, EXPTIME …) in the FITS files themselves, "
                                     "for the selected frames or all of them - the old values are kept for Undo")
@@ -1444,6 +1448,7 @@ class MainWindow(QMainWindow):
         for a in (self.act_flag, self.act_autoflag, self.act_reject_flagged, self.act_clear_flags):
             m.addAction(a)
         m.addAction(self.act_set_filter)
+        m.addAction(self.act_filter_id)
         m.addAction(self.act_edit_headers)
         m.addAction(self.act_undo_headers)
         m.addAction(self.act_header)
@@ -1693,6 +1698,21 @@ class MainWindow(QMainWindow):
             d.show()
             d.raise_()
             d.activateWindow()
+        return d
+
+    def open_filter_id(self, uids=None, show=True, wait=False):
+        """Frame › Identify Filter…: the selected frames (several selected), else all frames."""
+        import filter_id_window
+        if not self.frames:
+            QMessageBox.information(self, APP_NAME, "Load some frames first.")
+            return None
+        if uids is None:
+            sel = self.selected_uids(multi_only=True)
+            uids = sel or list(self.order or self.frames)
+        d = filter_id_window.FilterIdDialog(self, uids)
+        if show:
+            d.show()
+        d.run(wait=wait)
         return d
 
     def open_nina_cleanup(self, show=True):

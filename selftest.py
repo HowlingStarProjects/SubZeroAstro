@@ -5230,6 +5230,93 @@ def run(app, out_dir: Path) -> int:
               f"Clean Up My N.I.N.A. Computers: only frames filed in the library with the same contents are deleted "
               f"({_nc_r0}; kept {_nc_left}); none while newer than the days kept ({_nc_r5}); emptied night folders go, "
               f"the shared folder stays")
+        # Filter Identifier: synthetic raw colour subs made to the reference fingerprints are told apart; the focus
+        # position tells no filter from L-CCD; a mono sub is declined; frames with a known filter teach it
+        import filter_id as _fi
+        _fi_dir = _au_root / "filter_id"
+        _fi_dir.mkdir(parents=True, exist_ok=True)
+
+        def _fi_sub(name, ref, focus, mono=False, seed=1):
+            rng = np.random.default_rng(seed)
+            h, w_ = 420, 560
+            scale = 206.265 * 3.76 / 265 * 2
+            g_sky = ref["bright"] * scale * scale / 0.2429 * 120
+            sky = (g_sky * ref["sky_rg"], g_sky, g_sky * ref["sky_bg"])
+            yy, xx = np.mgrid[0:h, 0:w_]
+            star = np.zeros((h, w_), np.float32)
+            for _k in range(160):
+                y0, x0 = rng.uniform(20, h - 20), rng.uniform(20, w_ - 20)
+                star += rng.uniform(800, 5000) * np.exp(-((yy - y0) ** 2 + (xx - x0) ** 2) / (2 * 1.3 ** 2))
+            pl = [sky[c] + star * (ref["star_rg"], 1.0, ref["star_bg"])[c] for c in range(3)]
+            bay = np.zeros((2 * h, 2 * w_), np.float32)
+            bay[0::2, 0::2], bay[0::2, 1::2], bay[1::2, 0::2], bay[1::2, 1::2] = pl[0], pl[1], pl[1], pl[2]
+            bay = 500 + bay + rng.normal(0, 1, bay.shape) * np.sqrt(np.maximum(bay, 1) / 0.2429 + 4)
+            hdr = {"INSTRUME": "ZWO ASI2600MC Air" if not mono else "ZWO ASI2600MM Pro", "EXPTIME": 120.0,
+                   "OFFSET": 50, "EGAIN": 0.2429, "XPIXSZ": 3.76, "FOCALLEN": 265, "FOCUSPOS": focus,
+                   "IMAGETYP": "Light"}
+            if not mono:
+                hdr["BAYERPAT"] = "RGGB"
+            p_ = _fi_dir / f"{name}.fits"
+            core.write_fits(p_, np.clip(bay, 0, 65535).astype(np.uint16), hdr, bitpix=16)
+            return p_
+        _fi_R = _fi.REFERENCES
+        _fi_cases = {"lqe": ("L-Quad Enhance", 18150), "lpro": ("L-Pro", 18140), "nof": ("No filter", 17500),
+                     "lccd": ("L-CCD", 18100), "lult": ("L-Ultimate", 18158)}
+        _fi_got = {}
+        for _k, (_n, _fpos) in _fi_cases.items():
+            _m = _fi.measure(_fi_sub(_k, _fi_R[_n], _fpos, seed=len(_fi_got) + 3))
+            _fi_got[_k] = (_fi.identify(_m, learned=[]), _m)
+        _fi_names = {k: (r.best, r.sure) for k, (r, _m) in _fi_got.items()}
+        _fi_mono = _fi.measure(_fi_sub("mono", _fi_R["No filter"], 17500, mono=True))
+        check(all(_fi_got[k][0].best == _fi_cases[k][0] for k in _fi_cases)
+              and _fi_got["lqe"][0].sure == "high" and not _fi_mono.ok and "monochrome" in _fi_mono.why,
+              f"Filter Identifier: subs with the reference fingerprints are identified ({_fi_names}); no filter and "
+              f"L-CCD told apart by the focus position; a mono sub is declined")
+        _fi_lf = _fi_dir / "learned.json"
+        _fi_odd = {"sky_rg": 0.9, "sky_bg": 0.9, "star_rg": 0.95, "star_bg": 0.9, "bright": 0.05}
+        _fi_m = _fi.measure(_fi_sub("odd", _fi_odd, 18000, seed=7))
+        _fi_m.header_filter = "My Odd Filter"
+        _fi_n1 = _fi.teach([_fi_m], path=_fi_lf)
+        _fi_n2 = _fi.teach([_fi_m], path=_fi_lf)            # each frame is learned once
+        _fi_m2 = _fi.measure(_fi_sub("odd2", _fi_odd, 18000, seed=8))
+        _fi_r2 = _fi.identify(_fi_m2, learned=_fi.load_learned(_fi_lf))
+        _fi_r3 = _fi.identify(_fi_m2, learned=[])
+        check(_fi_n1 == 1 and _fi_n2 == 0 and _fi_r2.best == "My Odd Filter" and _fi_r3.best != "My Odd Filter",
+              f"Filter Identifier › Teach: a frame with a known filter teaches it ({_fi_r2.name}; without it: "
+              f"{_fi_r3.name}, {_fi_r3.sure})")
+        # the window: measures in the background, Use as Filter Name and Write FILTER Into the Files
+        from PySide6.QtWidgets import QWidget as _QW
+        from types import SimpleNamespace as _NS
+        import filter_id_window as _fiw
+
+        class _FiOwner(_QW):
+            def __init__(self, paths):
+                super().__init__()
+                self.frames = {i: _NS(path=p_, info={}) for i, p_ in enumerate(paths)}
+                self.set_to, self.written = {}, {}
+
+            def set_filter(self, uids, name):
+                for u in uids:
+                    self.set_to[u] = name
+
+            def _write_headers(self, frames, changes):
+                import fits_edit as _fe_
+                _fe_.edit_many([f.path for f in frames], changes)
+                for f in frames:
+                    self.written[Path(f.path).name] = changes["FILTER"]
+                    f.info["filter"] = changes["FILTER"]
+        _fio = _FiOwner([_fi_dir / "lqe.fits", _fi_dir / "lpro.fits", _fi_dir / "mono.fits"])
+        _fid = _fiw.FilterIdDialog(_fio, list(_fio.frames))
+        _fid.run(wait=True)
+        _fid_rows = [(_fid.table.item(i, 2).text(), _fid.table.item(i, 3).text()) for i in range(_fid.table.rowCount())]
+        _fid_n = _fid.use_names()
+        _fid_w = _fid.write_files(ask=False)
+        _fid_hdr = core.read_fits(_fi_dir / "lqe.fits", header_only=True)[2].get("FILTER")
+        _fid.close()
+        check(_fid_rows[0][0] == "L-Quad Enhance" and _fid_rows[2][1] == "Can't tell" and _fid_n == 2
+              and _fio.set_to == {0: "L-Quad Enhance", 1: "L-Pro"} and _fid_w == 2 and _fid_hdr == "L-Quad Enhance",
+              f"Frame › Identify Filter…: the window lists each frame ({_fid_rows}), Use as Filter Name sets "
+              f"{_fid_n}, Write FILTER Into the Files writes {_fid_w} (FILTER now {_fid_hdr!r})")
         # the real forecast services, from this build (information only - the internet isn't the app's fault)
         import weather as _wxl
         try:
