@@ -32,7 +32,7 @@ bapoteet/SubZeroAstro on 2026-11-17; the old address forwards).
 feature; use variable names with a unique prefix (the test is one long function).
 
 ## Build machines
-Repository variable `OWN_RUNNERS=true` sends both jobs to Brian's own PC and Mac (self-hosted runners with the
+Repository variable `OWN_RUNNERS=true` (only once the repo is private) sends both jobs to Brian's own PC and Mac (self-hosted runners with the
 label `subzeroastro`); unset, GitHub's windows-latest / macos-15 build as before. Own machines use their installed
 Python 3.13 in a fresh venv per build. If a machine is off, its job waits in the queue.
 
@@ -51,8 +51,11 @@ Python 3.13 in a fresh venv per build. If a machine is off, its job waits in the
 - Write for an astrophotographer, not a programmer: plain words in the UI, manual and replies.
 
 ## Plans in progress (Nov 2026)
-- Repository goes **private** once the user's Windows PC and Mac are set up as self-hosted GitHub Actions runners
-  (private repos pay for hosted minutes; Mac minutes count 10x).
+- Repository goes **private** after a release with the new update check (downloads repo) has been out a week or
+  two. Only THEN register Brian's PC and Mac as self-hosted runners and set OWN_RUNNERS=true: runners on a public
+  repo can run code from strangers' pull requests. (Private repos pay for hosted minutes; Mac minutes count 10x.)
+  Windows runner runs interactively (startup shortcut to run.cmd, auto sign-in), not as a service: the self-test
+  needs a desktop and the service account can't see the user's Python.
 - Then: copyright/About/EULA in the LLC's name (proprietary licence replacing MIT for new versions - lawyer reviews),
   a build with Nuitka (compiled, harder to copy), and downloads + update checks from subzeroastro.com instead of
   GitHub releases (updater.py reads the public downloads repo first, then this repo while it is public).
