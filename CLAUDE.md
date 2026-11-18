@@ -17,16 +17,24 @@ bapoteet/SubZeroAstro on 2026-11-17; the old address forwards).
    ```
 3. Commit as the user: `git -c user.name=bapoteet -c user.email=bapoteet@users.noreply.github.com commit` with a
    message starting "0.9.NNN: what the user gets".
-4. Push (never while a build is running), then release: dispatch `build-windows.yml` with `release_tag=v0.9.NNN-beta`,
-   or push that tag (tags `v*` build a release too).
+4. Push (never while a build is running), then release: push the tag `v0.9.NNN-beta`, or dispatch `build-windows.yml`
+   with `release_tag=v0.9.NNN-beta`. A plain push to main does not build any more (one build per release); dispatch
+   without a release_tag for a test build.
 5. Check the self-tests: branches `selftest-results` (Windows) and `selftest-results-mac`, file
    `*/console.txt`, last line `RESULT: ALL CHECKS PASSED`. Check the release has the Windows zip, the Mac zip and
-   the manual, and that its notes say both apps are signed.
+   the manual, and that its notes say both apps are signed - in this repo and, once the secret DOWNLOADS_TOKEN
+   exists, in the public downloads repo HowlingStarProjects/SubZeroAstro-Downloads (what users and the app's
+   update check see).
 6. Tell the user what changed, in plain words.
 
 ## Self-tests
 `python subzeroastro.py --selftest <dir>` runs `selftest.py` in a real window. Add a `check(ok, msg)` for every
 feature; use variable names with a unique prefix (the test is one long function).
+
+## Build machines
+Repository variable `OWN_RUNNERS=true` sends both jobs to Brian's own PC and Mac (self-hosted runners with the
+label `subzeroastro`); unset, GitHub's windows-latest / macos-15 build as before. Own machines use their installed
+Python 3.13 in a fresh venv per build. If a machine is off, its job waits in the queue.
 
 ## Signing (releases only, both `continue-on-error`: a signing problem ships unsigned, never blocks)
 - Windows: Azure Artifact Signing (account SubZeroAstro, profile SubZeroAstroRelease), secrets AZURE_TENANT_ID,
@@ -47,5 +55,5 @@ feature; use variable names with a unique prefix (the test is one long function)
   (private repos pay for hosted minutes; Mac minutes count 10x).
 - Then: copyright/About/EULA in the LLC's name (proprietary licence replacing MIT for new versions - lawyer reviews),
   a build with Nuitka (compiled, harder to copy), and downloads + update checks from subzeroastro.com instead of
-  GitHub releases (updater.py reads GitHub releases today).
+  GitHub releases (updater.py reads the public downloads repo first, then this repo while it is public).
 - Filter Identifier (filter_id.py): reference fingerprints from NGC 281 subs, ASI2600MC Air + Askar SQA55.

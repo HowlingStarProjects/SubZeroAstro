@@ -1,6 +1,15 @@
 name: Build Windows app
 
-# Runs on every push to main, on version tags (v0.2.0, v0.3.0 …) and on demand.
+# Runs once per release: when a version tag (v0.9.285-beta …) is pushed, or when run by hand (with a release_tag
+# for a release, without one for a test build). A plain push to main no longer builds, so a release isn't built twice.
+#
+# Build machines: GitHub's own (windows-latest / macos-15), or Brian's PC and Mac once they are set up as
+# self-hosted runners with the label "subzeroastro" - switched by the repository variable OWN_RUNNERS = true.
+# On our own machines the Python 3.13 installed there is used (in a fresh virtual environment for every build).
+#
+# Downloads: when the secret DOWNLOADS_TOKEN exists, each release is also published to the public downloads repo
+# (variable DOWNLOADS_REPO, default HowlingStarProjects/SubZeroAstro-Downloads), where the app's update check
+# and subzeroastro.com find it - so this repository can be private.
 # 1. installs the libraries on a real Windows machine
 # 2. runs the self-test with the real app window (screenshots are kept)
 # 3. builds "SubZeroAstro.exe" with PyInstaller and self-tests the .exe too
@@ -17,7 +26,6 @@ name: Build Windows app
 
 on:
   push:
-    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -31,17 +39,27 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ${{ vars.OWN_RUNNERS == 'true' && fromJSON('["self-hosted","Windows","subzeroastro"]') || 'windows-latest' }}
     timeout-minutes: 90           # a signing request waits for the manual approval in SignPath
     env:
       AZ_SIGN: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' }}
+      DL_ON: ${{ secrets.DOWNLOADS_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
+        if: runner.environment == 'github-hosted'
         with:
           python-version: "3.13"
           cache: pip
+
+      - name: Fresh Python for this build (own PC)
+        if: runner.environment != 'github-hosted'
+        shell: pwsh
+        run: |
+          py -3.13 -m venv "$env:RUNNER_TEMP\venv"
+          if ($LASTEXITCODE -ne 0) { throw "Python 3.13 is not installed on this PC (python.org, 'Add to PATH')" }
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:RUNNER_TEMP\venv\Scripts"
 
       - name: Install libraries
         run: |
@@ -189,6 +207,23 @@ jobs:
           gh release create "$env:TAG" SubZeroAstro-Windows.zip --target "${{ github.sha }}" @pre `
             --title "SubZeroAstro $env:TAG" `
             --notes-file release_notes.md
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
+
+      # the same release in the public downloads repo (the app's update check and subzeroastro.com read it there)
+      - name: Publish the Windows app to the downloads repo
+        if: (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag != '') && env.DL_ON == 'true'
+        shell: pwsh
+        env:
+          DL_TOKEN: ${{ secrets.DOWNLOADS_TOKEN }}
+          GH_TOKEN: ${{ secrets.DOWNLOADS_TOKEN }}
+          DL_REPO: ${{ vars.DOWNLOADS_REPO || 'HowlingStarProjects/SubZeroAstro-Downloads' }}
+          TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
+        run: |
+          $pre = @()
+          if ($env:TAG -match 'beta|rc|alpha') { $pre = @('--prerelease') }
+          gh release create "$env:TAG" SubZeroAstro-Windows.zip -R "$env:DL_REPO" @pre `
+            --title "SubZeroAstro $env:TAG" --notes-file release_notes.md
+          if ($LASTEXITCODE -ne 0) { throw "could not publish to $env:DL_REPO (does DOWNLOADS_TOKEN still have access?)" }
 
   build-mac:
     # The same app for Macs with Apple silicon (M1/M2/M3/M4), built and self-tested on a real Mac.
@@ -196,17 +231,28 @@ jobs:
     # secrets are set; if anything with Apple fails, the release still goes out with the old ad-hoc signature.
     needs: build
     if: always()
-    runs-on: macos-15                # macos-14 is retired on 2026-11-02 (brownouts before that cancel its jobs)
+    # GitHub's Mac (macos-14 was retired on 2026-11-02), or Brian's own Mac with the label "subzeroastro"
+    runs-on: ${{ vars.OWN_RUNNERS == 'true' && fromJSON('["self-hosted","macOS","ARM64","subzeroastro"]') || 'macos-15' }}
     timeout-minutes: 90
     env:
       MAC_SIGN: ${{ secrets.MACOS_CERT_P12 != '' && secrets.APPLE_APP_PASSWORD != '' }}
+      DL_ON: ${{ secrets.DOWNLOADS_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
+        if: runner.environment == 'github-hosted'
         with:
           python-version: "3.13"
           cache: pip
+
+      - name: Fresh Python for this build (own Mac)
+        if: runner.environment != 'github-hosted'
+        run: |
+          PY=$(command -v python3.13 || echo /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13)
+          [ -x "$PY" ] || { echo "Python 3.13 is not installed on this Mac (python.org installer)"; exit 1; }
+          "$PY" -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
 
       - name: Install libraries
         run: |
@@ -314,6 +360,15 @@ jobs:
           xcrun stapler validate "$APP"
           spctl --assess --type execute --verbose=4 "$APP"
 
+      - name: Remove the signing keychain (own Mac keeps no certificate copy between builds)
+        if: always() && runner.environment != 'github-hosted'
+        run: |
+          KC="$RUNNER_TEMP/sza-signing.keychain-db"
+          if [ -f "$KC" ]; then
+            security list-keychains -d user -s $(security list-keychains -d user | tr -d '"' | grep -v sza-signing)
+            security delete-keychain "$KC" || true
+          fi
+
       - name: Back to the ad-hoc signature (signing or notarization failed)
         if: steps.macsign.outcome == 'failure'
         run: codesign --force --deep --sign - dist/SubZeroAstro.app
@@ -364,3 +419,17 @@ jobs:
             printf '%s\n\nThe Mac app is signed by the publisher Brian Poteet and notarized by Apple: unzip it and double-click SubZeroAstro.app.\n' "$BODY" > "$RUNNER_TEMP/notes.md"
             gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
           fi
+
+      - name: Add the Mac app to the downloads repo
+        if: (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag != '') && env.DL_ON == 'true'
+        env:
+          DL_TOKEN: ${{ secrets.DOWNLOADS_TOKEN }}
+          DL_REPO: ${{ vars.DOWNLOADS_REPO || 'HowlingStarProjects/SubZeroAstro-Downloads' }}
+          TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
+        run: |
+          # notes come from this repo's release (already including the Mac signing line)
+          BODY=$(GH_TOKEN="${{ github.token }}" gh release view "$TAG" --json body -q .body)
+          printf '%s\n' "$BODY" > "$RUNNER_TEMP/dl_notes.md"
+          export GH_TOKEN="$DL_TOKEN"
+          gh release upload "$TAG" SubZeroAstro-macOS-AppleSilicon.zip docs/SubZeroAstro_User_Manual.pdf -R "$DL_REPO" --clobber
+          gh release edit "$TAG" -R "$DL_REPO" --notes-file "$RUNNER_TEMP/dl_notes.md"

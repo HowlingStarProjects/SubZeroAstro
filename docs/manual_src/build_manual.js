@@ -215,15 +215,15 @@ bullets([
 ch(3, "Installing SubZeroAstro");
 sec("3.1", "Windows", ["Install (Windows)", "SmartScreen"]);
 steps([
-  "Open the SubZeroAstro releases page: **github.com/HowlingStarProjects/SubZeroAstro/releases**.",
-  "Under the newest release, click **SubZeroAstro-Windows.zip** to download it.",
+  "Go to **subzeroastro.com** and click **Download** (or open the downloads page directly: **github.com/HowlingStarProjects/SubZeroAstro-Downloads/releases**).",
+  "Under the newest version, click **SubZeroAstro-Windows.zip** to download it.",
   "Right-click the downloaded zip › **Extract All…** and choose a permanent place, e.g. `C:\\Astro\\SubZeroAstro`.",
   "Open the extracted folder and double-click **SubZeroAstro.exe**. (Right-click › *Pin to Start* or *Send to › Desktop* gives you a shortcut.)",
   "SubZeroAstro is signed by its publisher. If Windows still shows **\"Windows protected your PC\"** (it can, while a new signature builds up its reputation with Microsoft), click **More info › Run anyway**.",
 ]);
 sec("3.2", "Mac (Apple silicon)", ["Install (Mac)", "Gatekeeper", "Quarantine"]);
 steps([
-  "Open **github.com/HowlingStarProjects/SubZeroAstro/releases** and download **SubZeroAstro-macOS-AppleSilicon.zip** from the newest release.",
+  "Go to **subzeroastro.com** and click **Download** (or open **github.com/HowlingStarProjects/SubZeroAstro-Downloads/releases**), and download **SubZeroAstro-macOS-AppleSilicon.zip** from the newest version.",
   "Double-click the zip in your Downloads folder; **SubZeroAstro.app** appears.",
   "Drag **SubZeroAstro.app** into your **Applications** folder.",
   "Double-click **SubZeroAstro.app**. The first time, macOS asks whether to open an app downloaded from the internet - click **Open**.",
@@ -231,7 +231,7 @@ steps([
 tip("From version 0.9.284 the Windows app is signed by its publisher and the Mac app is signed and notarized by Apple, so both open like any other app. An older version on a Mac needed right-click › Open the first time.", "Signed and notarized");
 tip("SubZeroAstro opens filling the screen, with the menu bar and Dock still showing. Avoid the green button's full-screen mode on a Mac: it hides the menu bar (where **Stack › Build Calibration Masters…** and **Help** live). To fill the screen yourself, **Option-click** the green button, or double-click the window's title bar. If you make the window smaller, it opens at that size next time.", "Mac: window size");
 sec("3.3", "Updating to a new version", ["Updating"]);
-p("Download the newest zip from the releases page and replace the old app folder (Windows) or the app in Applications (Mac). **Your settings, tool locations, rig names, saved measurements and saved progress are kept** - they are stored separately from the app.");
+p("SubZeroAstro looks for a new version each time it starts and offers **Update Now** in a blue bar on page 1 (or use **Help › Check for Updates**). To update by hand, download the newest zip from the downloads page and replace the old app folder (Windows) or the app in Applications (Mac). **Your settings, tool locations, rig names, saved measurements and saved progress are kept** - they are stored separately from the app.");
 sec("3.4", "Removing SubZeroAstro", ["Uninstall"]);
 p("Delete the app folder (Windows) or drag SubZeroAstro from Applications to the Bin (Mac). Saved progress can be cleared first under **Settings › Saved Progress**. Your images are never touched.");
 

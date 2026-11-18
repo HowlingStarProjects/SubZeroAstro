@@ -32,11 +32,11 @@ independently for Windows.
 
 ## Download (easiest — no Python needed)
 
-Go to the repository's **Releases** page (right-hand side on GitHub), download
-**SubZeroAstro-Windows.zip** from the latest release, unzip it anywhere and run
-**`SubZeroAstro.exe`** inside the folder. If Windows SmartScreen warns about an
-unrecognized app, click **More info → Run anyway**. Releases are being set up for
-free code signing by SignPath — see the [Code signing policy](#code-signing-policy).
+Go to **[subzeroastro.com](https://subzeroastro.com)** and click **Download** (or open the
+[downloads page](https://github.com/HowlingStarProjects/SubZeroAstro-Downloads/releases) directly), download
+**SubZeroAstro-Windows.zip** from the newest version, unzip it anywhere and run
+**`SubZeroAstro.exe`** inside the folder. The app is signed by its publisher; if Windows SmartScreen still warns
+while the signature builds up its reputation, click **More info → Run anyway**.
 
 **Shortcut (Windows):** right-click **SubZeroAstro.exe** › *Show more options* › **Send to › Desktop
 (create shortcut)**, or right-click › **Pin to Start** / **Pin to taskbar**.
@@ -48,15 +48,16 @@ The app is signed and notarized by Apple, so it opens with a double-click (the f
 `ASTAP.app`, `GraXpert.app` and the RC-Astro CLI wherever you installed them. To keep it in the Dock, open it once,
 then right-click its Dock icon › **Options › Keep in Dock**.
 
-Every change pushed to GitHub is built and tested automatically on Windows and macOS
-(see the **Actions** tab), including a self-test that opens the real window.
+Every release is built and tested automatically on Windows and macOS, including a self-test that opens the
+real window.
 You can run the same self-test yourself: `python subzeroastro.py --selftest`
 (or `"SubZeroAstro.exe" --selftest`) — it writes `selftest_output\selftest_result.txt`
 and screenshots.
 
 ## Updating
 
-Download the newest **SubZeroAstro-Windows.zip** from Releases, delete the old app
+SubZeroAstro offers each new version itself (**Update Now** in the blue bar on page 1, or **Help › Check for
+Updates**). By hand: download the newest **SubZeroAstro-Windows.zip** from the downloads page, delete the old app
 folder (or unzip to a new one) and run **SubZeroAstro.exe**. Your settings, tool paths,
 rig names and saved measurements are stored separately and carry over — including
 from versions released under the earlier name "FITS Blaster for Windows".
