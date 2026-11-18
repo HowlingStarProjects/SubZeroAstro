@@ -260,8 +260,12 @@ class _Status:
 
 
 def _store(s):
+    """A second settings object on the same store. The usual (native) settings are opened by name - on a Mac by
+    path they would bypass the system's settings service, and the window would never see the change."""
     from PySide6.QtCore import QSettings
     try:
+        if s.format() == QSettings.NativeFormat and s.applicationName():
+            return QSettings(QSettings.NativeFormat, s.scope(), s.organizationName(), s.applicationName())
         return QSettings(s.fileName(), s.format())
     except Exception:  # noqa: BLE001
         return s
