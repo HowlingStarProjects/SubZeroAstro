@@ -447,7 +447,7 @@ def new_project(from_page, load=True):
 
 
 MANUAL_NAME = "SubZeroAstro_User_Manual.pdf"
-MANUAL_URL = "https://github.com/bapoteet/SubZeroAstro/blob/main/docs/" + MANUAL_NAME
+MANUAL_URL = "https://github.com/HowlingStarProjects/SubZeroAstro/blob/main/docs/" + MANUAL_NAME
 
 
 def app_icon_path():

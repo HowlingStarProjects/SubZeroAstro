@@ -4129,7 +4129,7 @@ def run(app, out_dir: Path) -> int:
         _rels = [{"tag_name": "v9.0.200-beta", "draft": True, "assets": [{"name": _an}]},
                  {"tag_name": "v9.0.150-beta", "assets": [{"name": "SomethingElse.zip"}]},
                  {"tag_name": "v9.0.130-beta", "name": "SubZeroAstro 9.0.130 beta", "body": "New: updates.",
-                  "html_url": "https://github.com/bapoteet/SubZeroAstro/releases/tag/v9.0.130-beta",
+                  "html_url": "https://github.com/HowlingStarProjects/SubZeroAstro/releases/tag/v9.0.130-beta",
                   "assets": [{"name": _an, "browser_download_url": "https://example.invalid/a.zip", "size": 150e6}]},
                  {"tag_name": "v9.0.125-beta", "assets": [{"name": _an}]},
                  {"tag_name": "v0.9.100-beta", "assets": [{"name": _an}]}]

@@ -43,9 +43,8 @@ free code signing by SignPath — see the [Code signing policy](#code-signing-po
 
 **Mac (Apple silicon, M1 or newer):** download **SubZeroAstro-macOS-AppleSilicon.zip**
 from the same release, double-click it, and drag **SubZeroAstro.app** to your Applications folder.
-The app is not notarized by Apple yet, so the first time **right-click (or Control-click) the app ›
-Open › Open**. If macOS still says it "is damaged" or "can't be opened", run this once in Terminal:
-`xattr -dr com.apple.quarantine /Applications/SubZeroAstro.app`. On a Mac, point the Tools fields to
+The app is signed and notarized by Apple, so it opens with a double-click (the first time macOS asks once - click
+**Open**). On a Mac, point the Tools fields to
 `ASTAP.app`, `GraXpert.app` and the RC-Astro CLI wherever you installed them. To keep it in the Dock, open it once,
 then right-click its Dock icon › **Options › Keep in Dock**.
 

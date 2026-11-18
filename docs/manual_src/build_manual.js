@@ -215,21 +215,20 @@ bullets([
 ch(3, "Installing SubZeroAstro");
 sec("3.1", "Windows", ["Install (Windows)", "SmartScreen"]);
 steps([
-  "Open the SubZeroAstro releases page: **github.com/bapoteet/SubZeroAstro/releases**.",
+  "Open the SubZeroAstro releases page: **github.com/HowlingStarProjects/SubZeroAstro/releases**.",
   "Under the newest release, click **SubZeroAstro-Windows.zip** to download it.",
   "Right-click the downloaded zip › **Extract All…** and choose a permanent place, e.g. `C:\\Astro\\SubZeroAstro`.",
   "Open the extracted folder and double-click **SubZeroAstro.exe**. (Right-click › *Pin to Start* or *Send to › Desktop* gives you a shortcut.)",
-  "If Windows shows **\"Windows protected your PC\"**, click **More info › Run anyway**. This appears because the app is new and not yet code-signed; it is safe to continue.",
+  "SubZeroAstro is signed by its publisher. If Windows still shows **\"Windows protected your PC\"** (it can, while a new signature builds up its reputation with Microsoft), click **More info › Run anyway**.",
 ]);
 sec("3.2", "Mac (Apple silicon)", ["Install (Mac)", "Gatekeeper", "Quarantine"]);
 steps([
-  "Open **github.com/bapoteet/SubZeroAstro/releases** and download **SubZeroAstro-macOS-AppleSilicon.zip** from the newest release.",
+  "Open **github.com/HowlingStarProjects/SubZeroAstro/releases** and download **SubZeroAstro-macOS-AppleSilicon.zip** from the newest release.",
   "Double-click the zip in your Downloads folder; **SubZeroAstro.app** appears.",
   "Drag **SubZeroAstro.app** into your **Applications** folder.",
-  "The first time only: **right-click** (or Control-click) the app › **Open**, then **Open** again in the message. After that it opens normally.",
-  "If macOS says the app \"is damaged\" or \"can't be opened\", open **Terminal** (Applications › Utilities) and type: `xattr -dr com.apple.quarantine /Applications/SubZeroAstro.app` then press Return and open the app again.",
+  "Double-click **SubZeroAstro.app**. The first time, macOS asks whether to open an app downloaded from the internet - click **Open**.",
 ]);
-tip("Both messages appear because SubZeroAstro is not yet signed by Microsoft or notarized by Apple. Signing is being set up for future versions.", "Why the warnings?");
+tip("From version 0.9.284 the Windows app is signed by its publisher and the Mac app is signed and notarized by Apple, so both open like any other app. An older version on a Mac needed right-click › Open the first time.", "Signed and notarized");
 tip("SubZeroAstro opens filling the screen, with the menu bar and Dock still showing. Avoid the green button's full-screen mode on a Mac: it hides the menu bar (where **Stack › Build Calibration Masters…** and **Help** live). To fill the screen yourself, **Option-click** the green button, or double-click the window's title bar. If you make the window smaller, it opens at that size next time.", "Mac: window size");
 sec("3.3", "Updating to a new version", ["Updating"]);
 p("Download the newest zip from the releases page and replace the old app folder (Windows) or the app in Applications (Mac). **Your settings, tool locations, rig names, saved measurements and saved progress are kept** - they are stored separately from the app.");
@@ -722,7 +721,7 @@ ch(11, "Troubleshooting and questions");
 sec("11.1", "Common questions", ["Troubleshooting", "FAQ"]);
 table(["Problem", "What to do"], [
   ["Windows: \"Windows protected your PC\"", "Click **More info › Run anyway** (3.1)."],
-  ["Mac: \"can't be opened\" or \"is damaged\"", "Right-click › Open, or the Terminal command in 3.2."],
+  ["Mac: \"can't be opened\" or \"is damaged\"", "Download the newest version (0.9.284 or later is notarized by Apple). For an older one: right-click › Open, or in Terminal `xattr -dr com.apple.quarantine /Applications/SubZeroAstro.app`."],
   ["Frames show **No filter**", "Set the filter on page 1 (*Filter used* or *Frame › Set Filter Name…*). Needed to match flats and to offer the right palettes."],
   ["Flats column is ✗ red", "No flats for that filter/rig. Change the row's Filter to match your flats, or add the flats folder."],
   ["Bright corners and dark rings", "Flats calibrated without bias/dark-flats, or flats that don't match. Check the ⚠ note on page 2 and add a bias or dark-flats (7.2)."],

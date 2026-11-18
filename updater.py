@@ -1,6 +1,6 @@
 """In-app updates: is a newer SubZeroAstro on GitHub, and 'Update Now' to install it.
 
-New versions are published as GitHub Releases of bapoteet/SubZeroAstro, each with a zipped app per
+New versions are published as GitHub Releases of HowlingStarProjects/SubZeroAstro, each with a zipped app per
 platform (SubZeroAstro-Windows.zip, SubZeroAstro-macOS-AppleSilicon.zip). On start-up (unless turned
 off) the newest release is looked up in the background; when it is newer than this copy, a slim blue
 banner on page 1 offers What's New / Update Now / Skip This Version.
@@ -27,7 +27,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressDialog,
                                QToolButton)
 
-REPO = "bapoteet/SubZeroAstro"
+REPO = "HowlingStarProjects/SubZeroAstro"
 API = f"https://api.github.com/repos/{REPO}/releases?per_page=20"
 PAGE = f"https://github.com/{REPO}/releases/latest"
 UA = "SubZeroAstro-updater"
