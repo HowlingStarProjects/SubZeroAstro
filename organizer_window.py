@@ -226,6 +226,10 @@ class OrganizeDialog(QDialog):
         h.addWidget(self.auto_note, 1)
         lay.addLayout(h)
         self._show_auto_note()
+        from PySide6.QtCore import QTimer
+        self._auto_timer = QTimer(self)
+        self._auto_timer.timeout.connect(self._watch_auto)
+        self._auto_timer.start(4000)
         self.status = QLabel("Start with <b>Your Rigs…</b> (once): name each telescope and the focal length it writes "
                              "in your files. Then pick a folder and Step 1 – Look Through the Files; Step 2 deals with "
                              "any duplicates; Step 3 – Organize lights up once you have seen the plan.")
@@ -415,18 +419,35 @@ class OrganizeDialog(QDialog):
         return True
 
     def _show_auto_note(self):
+        """The Organize Automatically note: on or off, a run going right now (with where it is), and the last run.
+        A scheduled run is its own process, so a timer looks at the settings every few seconds."""
+        import html
         import organizer_auto as A
         cfg = A.load_config(self.settings)
-        last = self.settings.value("auto_org/last", "") or ""
+        last = self.settings.value("auto_org/last_html", "") or html.escape(self.settings.value("auto_org/last", "")
+                                                                           or "")
         if cfg["on"]:
             t = f"<b>Automatic:</b> {A.FREQS.get(cfg['freq'], '')} at {cfg['time']}"
         else:
             t = "<i>Automatic organizing is off</i>"
+        now = A.running_status(self.settings)
+        if now:
+            t += f"<br><b style='color:#e0b040'>{html.escape(A.describe_running(now))}</b>"
         if last:
             t += f"<br><i>Last automatic run: {last}</i>"
         if cfg["on"]:                                # green for go: it's on, at a glance
             t = f"<span style='color:#46c85f'>{t}</span>"
-        self.auto_note.setText(t)
+        if t != self.auto_note.text():
+            self.auto_note.setText(t)
+        return t
+
+    def _watch_auto(self):
+        """Every few seconds: re-read the settings another process (the scheduled run) writes, update the note."""
+        try:
+            self.settings.sync()
+            self._show_auto_note()
+        except Exception:  # noqa: BLE001 - a status line must never break the window
+            pass
 
     def open_auto(self, cfg=None, run_now=False):
         d = AutoDialog(self.settings, self)
@@ -1527,8 +1548,12 @@ class AutoDialog(QDialog):
         self.note = QLabel("")
         self.note.setWordWrap(True)
         lay.addWidget(self.note)
-        last = settings.value("auto_org/last", "") or ""
-        self.note.setText(("<b>On.</b> " if cfg["on"] else "<b>Off.</b> ") + (f"Last run: {last}" if last else ""))
+        self._was_running = False
+        self._show_state(cfg)
+        from PySide6.QtCore import QTimer
+        self._tick = QTimer(self)
+        self._tick.timeout.connect(self._watch)
+        self._tick.start(3000)
         hb = QHBoxLayout()
         self.b_now = QPushButton("Run Now")
         self.b_now.setToolTip("One run right now with these settings (the schedule is not changed)")
@@ -1546,6 +1571,38 @@ class AutoDialog(QDialog):
         hb.addWidget(b_close)
         lay.addLayout(hb)
         self.resize(760, 420)
+
+    def _show_state(self, cfg=None):
+        import html
+        cfg = cfg or self.A.load_config(self.settings)
+        last = self.settings.value("auto_org/last_html", "") or html.escape(self.settings.value("auto_org/last", "")
+                                                                           or "")
+        now = self.A.running_status(self.settings)
+        t = "<b>On.</b> " if cfg["on"] else "<b>Off.</b> "
+        if now:
+            t += f"<b>{html.escape(self.A.describe_running(now))}</b><br>"
+        if last:
+            t += f"Last run: {last}"
+        self.note.setText(t)
+
+    def _watch(self):
+        """A run going (scheduled, or Run Now): show where it is every few seconds, and the result when it ends."""
+        import html
+        try:
+            self.settings.sync()
+            now = self.A.running_status(self.settings)
+            if now:
+                self._was_running = True
+                self.b_now.setEnabled(False)
+                self.note.setText("<b>" + html.escape(self.A.describe_running(now)) + "</b><br>It "
+                                  "keeps going even if you close SubZeroAstro.")
+            elif self._was_running:
+                self._was_running = False
+                self.b_now.setEnabled(True)
+                if getattr(self, "_poll", None) is None or not self._poll.isActive():
+                    self.note.setText("<b>Done:</b> " + (self.settings.value("auto_org/last_html", "") or ""))
+        except Exception:  # noqa: BLE001
+            pass
 
     def _pick(self, ed):
         d = QFileDialog.getExistingDirectory(self, "Choose a folder", ed.text() or str(Path.home()))
@@ -1615,8 +1672,9 @@ class AutoDialog(QDialog):
                 last = self.settings.value("auto_org/last", "") or ""
                 if last and last != before:
                     self._poll.stop()
+                    self._was_running = False
                     self.b_now.setEnabled(True)
-                    self.note.setText("<b>Done:</b> " + last)
+                    self.note.setText("<b>Done:</b> " + (self.settings.value("auto_org/last_html", "") or last))
             self._poll.timeout.connect(poll)
             self._poll.start(2000)
             return True

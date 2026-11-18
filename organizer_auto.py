@@ -27,6 +27,8 @@ TASK_NAME = "SubZeroAstro Auto-Organize"
 MAC_LABEL = "io.github.bapoteet.subzeroastro.autoorganize"
 SETTLE_MIN = 60            # a file changed in the last hour may still be arriving: it waits for the next run
 LOCK_STALE_H = 12
+STATUS_EVERY_S = 3         # a running run says where it is at most this often (the windows look every few seconds)
+STATUS_QUIET_MIN = 60      # a run on another computer that hasn't said anything for this long has stopped
 FREQS = {"daily": "Every day", "twice": "Twice a week (Monday and Thursday)", "weekly": "Once a week (Sunday)"}
 _DAYS = {"twice": ["MON", "THU"], "weekly": ["SUN"]}
 _MAC_DAY = {"SUN": 0, "MON": 1, "TUE": 2, "WED": 3, "THU": 4, "FRI": 5, "SAT": 6}
@@ -88,6 +90,12 @@ def run(cfg=None, settings=None, progress=None, now=None) -> dict:
     cfg = cfg or load_config(s)
     stamp = time.strftime("%Y-%m-%d %H:%M")
     rep = {"time": stamp, "filed": 0, "left": {}, "log": "", "error": ""}
+    outer = progress
+    say = _Status(s, stamp, outer, quiet=running_status(s) is not None)   # another run going: don't talk over it
+    say("Starting - checking the folders", force=True)
+
+    def progress(text, i=None, n=None, force=False):
+        say(text, i, n, force)
     bad = problems(cfg)
     src = Path(cfg.get("src", ""))
     for k in ("src", "dst"):                         # a Mac: NAS folders must be mounted - remember / reconnect
@@ -119,6 +127,7 @@ def run(cfg=None, settings=None, progress=None, now=None) -> dict:
             _finish(rep, s, None)
             return rep
         lock.write_text(f"{stamp}|{os.getpid()}|{_host()}", encoding="utf-8")
+        say.quiet = False
     except OSError as e:
         rep["error"] = f"the library {lib} can't be written ({e})"
         _finish(rep, s, None)
@@ -134,10 +143,11 @@ def run(cfg=None, settings=None, progress=None, now=None) -> dict:
                 units = A.load_units(s)
                 inc = (s.value("asiair/incoming", "") or "").strip() or str(src)
                 if units:
-                    if progress:
-                        progress("Fetching from your ASIAIRs…")
-                    reps = A.fetch_all(units, inc, free=s.value("asiair/free", False, type=bool))
+                    progress(f"Fetching new subs from your {len(units)} ASIAIR(s)", force=True)
+                    reps = A.fetch_all(units, inc, free=s.value("asiair/free", False, type=bool),
+                                       progress=lambda t, i, n: progress(t))
                     rep["asiair"] = A.describe(reps).replace("\n", "; ")
+                    rep["asiair_lines"] = A.describe(reps).splitlines()
                     try:
                         A.record_last(s, reps)
                     except Exception:  # noqa: BLE001
@@ -145,8 +155,10 @@ def run(cfg=None, settings=None, progress=None, now=None) -> dict:
             except Exception as e:  # noqa: BLE001
                 rep["asiair"] = f"ASIAIR fetch failed: {e}"
         t_now = now if now is not None else time.time()
+        progress("Looking through the incoming folder", force=True)
         paths, settling = [], 0
-        for p in O.scan(src):
+        for p in O.scan(src, progress=lambda t, k: progress(f"Looking through the incoming folder: {k:,} file(s) "
+                                                             f"found so far")):
             try:
                 if t_now - p.stat().st_mtime < SETTLE_MIN * 60:
                     settling += 1                       # still arriving, perhaps: next run
@@ -154,10 +166,12 @@ def run(cfg=None, settings=None, progress=None, now=None) -> dict:
             except OSError:
                 continue
             paths.append(p)
-        if progress:
-            progress(f"{len(paths)} file(s) to look at")
+        progress(f"{len(paths):,} file(s) to look at", force=True)
         items = O.plan(O.classify(paths, library=lib, layout=cfg.get("layout") or "rig", root=src,
-                                  riglist=riglist, tol=tol), lib)
+                                  riglist=riglist, tol=tol,
+                                  progress=lambda t, i: progress(
+                                      f"Reading the files' headers: {min(i + 1, len(paths)):,} of {len(paths):,}")),
+                       lib, progress=lambda t, i, n: progress(f"Checking for duplicates: {i:,} of {n:,}", i, n))
         todo = [i for i in items if i.status == "move"]
         if cfg.get("jpgs", True):
             rep["jpgs"] = O.delete_previews(items, lib, roots=[src])   # the ASIAIR's .jpg previews
@@ -167,8 +181,10 @@ def run(cfg=None, settings=None, progress=None, now=None) -> dict:
             for g in gone:
                 _note(f"deleted empty frame (all zeros): {g}")
         if todo:
+            progress(f"Moving {len(todo):,} file(s) into your library", force=True)
             log = O.execute(items, lib, move=True, keep=[src],
-                            progress=(lambda t, i, n: progress(t)) if progress else None)
+                            progress=lambda t, i, n: progress(f"Moving files into your library: {i:,} of {n:,}",
+                                                              i, n))
             rep["log"] = str(log)
             try:
                 d = json.loads(log.read_text(encoding="utf-8"))
@@ -202,8 +218,7 @@ def run(cfg=None, settings=None, progress=None, now=None) -> dict:
         if s.value("nina_clean/with_auto", False, type=bool):    # then free space on the N.I.N.A. computers
             try:
                 import nina_cleanup as NC
-                if progress:
-                    progress("Cleaning up your N.I.N.A. computers…")
+                progress("Cleaning up your N.I.N.A. computers", force=True)
                 txt = NC.run(s)
                 if txt:
                     rep["nina"] = txt
@@ -219,6 +234,83 @@ def run(cfg=None, settings=None, progress=None, now=None) -> dict:
             pass
     _finish(rep, s, base)
     return rep
+
+
+class _Status:
+    """Where a run is, for the windows: saved in the settings (auto_org/now) every few seconds, so the Organize
+    window and Organize Automatically can show 'Running now…' with its progress - the run is its own process.
+    Written through its own settings object: the run may be on a thread of the app while the window reads."""
+
+    def __init__(self, s, stamp, outer=None, quiet=False):
+        self.s, self.stamp, self.outer, self.quiet = s, stamp, outer, quiet
+        self.t0, self.last = time.time(), 0.0
+
+    def __call__(self, text, i=None, n=None, force=False):
+        if self.outer:
+            try:
+                self.outer(text)
+            except Exception:  # noqa: BLE001
+                pass
+        now = time.time()
+        if self.quiet or (not force and now - self.last < STATUS_EVERY_S):
+            return
+        self.last = now
+        _write_status(self.s, {"started": self.stamp, "t0": self.t0, "step": text, "at": now,
+                               "pid": os.getpid(), "host": _host()})
+
+
+def _store(s):
+    from PySide6.QtCore import QSettings
+    try:
+        return QSettings(s.fileName(), s.format())
+    except Exception:  # noqa: BLE001
+        return s
+
+
+def _write_status(s, st):
+    try:
+        st_ = _store(s)
+        if st is None:
+            st_.remove("auto_org/now")
+        else:
+            st_.setValue("auto_org/now", json.dumps(st))
+        st_.sync()
+    except Exception:  # noqa: BLE001 - never stop a run over a status line
+        pass
+
+
+def running_status(settings, now=None):
+    """The run going right now ({started, t0, step, at, pid, host}), or None. A run that was stopped (SubZeroAstro
+    closed, the computer switched off) leaves its line behind; it doesn't count once its process is gone, or - for
+    a run on another computer - once it has been quiet for STATUS_QUIET_MIN minutes."""
+    try:
+        st = json.loads(settings.value("auto_org/now", "") or "null")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(st, dict):
+        return None
+    now = now if now is not None else time.time()
+    try:
+        age = now - float(st.get("at", 0))
+        if now - float(st.get("t0", st.get("at", 0))) > LOCK_STALE_H * 3600:
+            return None
+        if st.get("host") and st.get("host") != _host():
+            return st if age < STATUS_QUIET_MIN * 60 else None
+        return st if _pid_alive(int(st.get("pid", 0))) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def describe_running(st, now=None) -> str:
+    now = now if now is not None else time.time()
+    mins = max(0, int((now - float(st.get("t0", now))) // 60))
+    took = "just started" if mins < 1 else f"{mins} min so far"
+    t = time.strftime("%H:%M", time.localtime(float(st.get("at", now))))
+    where = "" if not st.get("host") or st.get("host") == _host() else f" on {st['host']}"
+    began = str(st.get("started", ""))
+    if began[:10] == time.strftime("%Y-%m-%d", time.localtime(now)):
+        began = began[11:]                                 # today: just the time
+    return f"Running now{where} (started {began}, {took}): {st.get('step', '')} - as of {t}"
 
 
 def _host() -> str:
@@ -344,12 +436,45 @@ def describe(rep) -> str:
     return t
 
 
+def describe_html(rep) -> str:
+    """The last run for the Organize window: one thing per line, and the ASIAIR advice once, not after each one."""
+    from html import escape
+    if rep.get("error"):
+        return escape(f"{rep['time']}: not run - {rep['error']}")
+    head = f"{rep['time']}: {rep['filed']:,} file(s) filed"
+    for k, what in (("other", "other file(s) deleted"), ("empty", "empty frame(s) deleted"),
+                    ("jpgs", ".jpg preview(s) deleted")):
+        if rep.get(k):
+            head += f", {rep[k]:,} {what}"
+    lines = [escape(head)]
+    hint = ""
+    for a in (rep.get("asiair_lines") or ([rep["asiair"]] if rep.get("asiair") else [])):
+        cut = a.find(" - is the ASIAIR on")
+        if cut > 0:
+            hint, a = a[cut + 3:], a[:cut]
+        lines.append("&nbsp;&nbsp;ASIAIR " + escape(a))
+    if hint:
+        lines.append("&nbsp;&nbsp;" + escape("Not reached? I" + hint[1:]))
+    if rep.get("left"):
+        lines.append(escape("Left in the incoming folder: " + ", ".join(f"{n:,} {w}" for w, n in rep["left"].items())))
+    if rep.get("nina"):
+        lines.append(escape(f"N.I.N.A. computers: {rep['nina']}"))
+    return "<br>".join(lines)
+
+
 def _finish(rep, s, base):
     text = describe(rep)
     try:
         s.setValue("auto_org/last", text)
+        s.setValue("auto_org/last_html", describe_html(rep))
         s.sync()
     except Exception:  # noqa: BLE001
+        pass
+    try:                                              # no longer running - unless it's another run's line
+        st = json.loads(_store(s).value("auto_org/now", "") or "null")
+        if isinstance(st, dict) and st.get("pid") == os.getpid() and st.get("host") == _host():
+            _write_status(s, None)
+    except (TypeError, ValueError):
         pass
     if base is not None:
         try:

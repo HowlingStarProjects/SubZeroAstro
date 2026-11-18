@@ -4729,6 +4729,52 @@ def run(app, out_dir: Path) -> int:
         check(_au_l1 and not _au_l2,
               f"Organize Automatically: a run left behind by SubZeroAstro being closed (or the computer switched "
               f"off) no longer blocks the next run ({_au_l1}, {_au_l2})")
+        # ...and while a run is going, the Organize window says so, with where it is, every few seconds (the
+        # scheduled run is its own process: it writes its progress to the settings, the window reads them)
+        _lv_seen = []
+
+        def _lv_prog(_lv_t):
+            w.settings.sync()
+            _lv_st = _au.running_status(w.settings)
+            if _lv_st:
+                _lv_seen.append(_au.describe_running(_lv_st))
+                _owin._watch_auto()
+                if "Running now" in _owin.auto_note.text():
+                    _lv_seen.append("note")
+        _lv_old = time.time() - 3 * 3600
+        for _lv_n, _lv_t in (("d.fits", "03:20"), ("e.fits", "03:30")):
+            core.write_fits(_au_inc / _lv_n, (_orng.random((16, 16)) * 4000).astype(np.uint16),
+                            {"IMAGETYP": "Light Frame", "EXPTIME": 180.0, "DATE-OBS": f"2026-10-02T{_lv_t}:00",
+                             "INSTRUME": "ZWO ASI2600MM Pro", "FOCALLEN": 361, "OBJECT": "M 31", "FILTER": "Ha",
+                             "SITELONG": -95.0}, bitpix=16)
+            os.utime(_au_inc / _lv_n, (_lv_old, _lv_old))
+        _lv_rep = _au.run(_au_cfg, w.settings, progress=_lv_prog)
+        w.settings.sync()
+        _lv_after = _au.running_status(w.settings)
+        _owin._watch_auto()
+        _lv_note = _owin.auto_note.text()
+        _au._write_status(w.settings, {"started": "x", "t0": time.time(), "step": "y", "at": time.time(),
+                                       "pid": 999999, "host": _au._host()})
+        w.settings.sync()
+        _lv_dead = _au.running_status(w.settings)
+        _au._write_status(w.settings, {"started": "x", "t0": time.time(), "step": "y", "at": time.time() - 7200,
+                                       "pid": 1, "host": "another-pc"})
+        w.settings.sync()
+        _lv_far = _au.running_status(w.settings)
+        _au._write_status(w.settings, None)
+        _lv_html = _au.describe_html({"time": "2026-11-16 07:00", "filed": 1241, "left": {"could not be read": 7},
+                                      "error": "", "asiair_lines": [
+                                          "A1: not fetched - can't reach 1.2.3.4 - is the ASIAIR on and on the same "
+                                          "network? (Its IP is in the ASIAIR app's Wi-Fi settings.)",
+                                          "A2: not fetched - can't reach 1.2.3.5 - is the ASIAIR on and on the same "
+                                          "network? (Its IP is in the ASIAIR app's Wi-Fi settings.)"]})
+        check(_lv_rep["filed"] == 2 and _lv_seen and "Running now" in _lv_seen[0] and "note" in _lv_seen
+              and any("into your library" in x for x in _lv_seen)
+              and _lv_after is None and "Running now" not in _lv_note and "2 file(s) filed" in _lv_note
+              and _lv_dead is None and _lv_far is None
+              and _lv_html.count("is the ASIAIR on") == 1 and _lv_html.count("<br>") == 4,
+              f"Organize Automatically shows a run as it goes ({_lv_seen[-2:] if _lv_seen else 'nothing'}), the "
+              f"result once it ends, never a run that was stopped; the last run one thing per line")
         import organizer_window as _ow_mod
         _rs_keep = w.settings.value("organize/rig_sort", "name")
         _rs_d = _ow_mod.YourRigsDialog(_owin, [{"name": "SQA106", "focals": [509]}, {"name": "RASA11", "focals": [620]},
