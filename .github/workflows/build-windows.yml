@@ -47,6 +47,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # can DOWNLOADS_TOKEN publish to the downloads repo? (makes and removes a branch "token-check" there)
+      # never stops the build - it only says early, in a test build too, what a release would run into
+      - name: Check the downloads repo token
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.DOWNLOADS_TOKEN }}
+          DL_REPO: ${{ vars.DOWNLOADS_REPO || 'HowlingStarProjects/SubZeroAstro-Downloads' }}
+        run: |
+          if ($env:DL_ON -ne 'true') { Write-Host "::warning::DOWNLOADS_TOKEN is not set - releases are not copied to $env:DL_REPO"; exit 0 }
+          $sha = gh api "repos/$env:DL_REPO/commits/HEAD" --jq .sha
+          if ($LASTEXITCODE -ne 0 -or -not $sha) { throw "DOWNLOADS_TOKEN can't see $env:DL_REPO (does the repo exist?)" }
+          gh api -X DELETE "repos/$env:DL_REPO/git/refs/heads/token-check" 2>$null | Out-Null
+          gh api -X POST "repos/$env:DL_REPO/git/refs" -f ref=refs/heads/token-check -f sha=$sha | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "DOWNLOADS_TOKEN can't write to $env:DL_REPO (it needs Contents: Read and write on that repo)" }
+          gh api -X DELETE "repos/$env:DL_REPO/git/refs/heads/token-check" | Out-Null
+          Write-Host "DOWNLOADS_TOKEN OK: can publish to $env:DL_REPO"
+          $global:LASTEXITCODE = 0
+
       - uses: actions/setup-python@v5
         if: runner.environment == 'github-hosted'
         with:
