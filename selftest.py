@@ -4742,13 +4742,18 @@ def run(app, out_dir: Path) -> int:
                 if "Running now" in _owin.auto_note.text():
                     _lv_seen.append("note")
         _lv_old = time.time() - 3 * 3600
+        _lv_root = _au_root / "live"                     # its own folders: the layout check below counts files
+        _lv_inc = _lv_root / "Incoming" / "SQA60Pro"
+        _lv_inc.mkdir(parents=True)
+        (_lv_root / "Library").mkdir()
         for _lv_n, _lv_t in (("d.fits", "03:20"), ("e.fits", "03:30")):
-            core.write_fits(_au_inc / _lv_n, (_orng.random((16, 16)) * 4000).astype(np.uint16),
+            core.write_fits(_lv_inc / _lv_n, (_orng.random((16, 16)) * 4000).astype(np.uint16),
                             {"IMAGETYP": "Light Frame", "EXPTIME": 180.0, "DATE-OBS": f"2026-10-02T{_lv_t}:00",
                              "INSTRUME": "ZWO ASI2600MM Pro", "FOCALLEN": 361, "OBJECT": "M 31", "FILTER": "Ha",
                              "SITELONG": -95.0}, bitpix=16)
-            os.utime(_au_inc / _lv_n, (_lv_old, _lv_old))
-        _lv_rep = _au.run(_au_cfg, w.settings, progress=_lv_prog)
+            os.utime(_lv_inc / _lv_n, (_lv_old, _lv_old))
+        _lv_rep = _au.run({"src": str(_lv_root / "Incoming"), "dst": str(_lv_root / "Library"), "layout": "rig"},
+                          w.settings, progress=_lv_prog)
         w.settings.sync()
         _lv_after = _au.running_status(w.settings)
         _owin._watch_auto()
@@ -4772,9 +4777,10 @@ def run(app, out_dir: Path) -> int:
               and any("into your library" in x for x in _lv_seen)
               and _lv_after is None and "Running now" not in _lv_note and "2 file(s) filed" in _lv_note
               and _lv_dead is None and _lv_far is None
-              and _lv_html.count("is the ASIAIR on") == 1 and _lv_html.count("<br>") == 4,
+              and _lv_html.lower().count("is the asiair on") == 1 and _lv_html.count("<br>") == 4,
               f"Organize Automatically shows a run as it goes ({_lv_seen[-2:] if _lv_seen else 'nothing'}), the "
-              f"result once it ends, never a run that was stopped; the last run one thing per line")
+              f"result once it ends ({_lv_rep['filed']} filed, {_lv_after}, {_lv_dead}, {_lv_far}), never a run "
+              f"that was stopped; the last run one thing per line")
         import organizer_window as _ow_mod
         _rs_keep = w.settings.value("organize/rig_sort", "name")
         _rs_d = _ow_mod.YourRigsDialog(_owin, [{"name": "SQA106", "focals": [509]}, {"name": "RASA11", "focals": [620]},
