@@ -1958,6 +1958,90 @@ def run(app, out_dir: Path) -> int:
             w.settings.setValue(k, v)
         w.settings.setValue(_tc.BANNER_OFF, _old_off)
         bn.hide()
+        # --- Set Up SubZeroAstro (first-run wizard), on its own settings file so nothing real changes ---
+        import setup_wizard as _sw
+        from PySide6.QtCore import QSettings as _swQS
+        _swd = session.parent / "setup_wizard"
+        _swd.mkdir(parents=True, exist_ok=True)
+        _sws = _swQS(str(_swd / "settings.ini"), _swQS.IniFormat)
+        _sws.clear()
+        check(_sw.is_new_install(_sws), "a brand-new install is recognised (no folders set yet)")
+        _sws.setValue("organize/dst", "/x/lib")
+        check(not _sw.is_new_install(_sws), "someone who already set folders is not shown the setup by itself")
+        _sws.clear()
+        check(hasattr(w, "act_setup") and w.act_setup.text().startswith("Set Up SubZeroAstro")
+              and any(a is w.act_setup for m_ in w.menuBar().actions() if m_.menu() for a in m_.menu().actions()),
+              "Settings › Set Up SubZeroAstro… is in the menu")
+        _swdlg = _sw.SetupWizard(_sws, None, first_run=True)
+        _swdlg.show()
+        QApplication.processEvents()
+        check(_swdlg.stack.currentIndex() == 0 and _swdlg.rb_main.isChecked() and any(
+              "main AstroComputer" in l_.text() for l_ in _swdlg.stack.currentWidget().findChildren(QLabel)),
+              "the setup starts by asking for the main AstroComputer")
+        shot("1c_setup_computer.png", _swdlg)
+        _swdlg.rb_other.setChecked(True)
+        QApplication.processEvents()
+        _sw_other = _swdlg.other_box.isVisibleTo(_swdlg)
+        _swdlg.rb_main.setChecked(True)
+        QApplication.processEvents()
+        check(_sw_other and not _swdlg.other_box.isVisibleTo(_swdlg),
+              "on another computer the setup offers the main computer's profile instead")
+        _swdlg.next_page()
+        _swmain = _swd / "Astro"
+        _swdlg.main_edit.setText(str(_swmain))
+        _swdlg.fill_suggested(force=True)
+        check(_swdlg.folder_edits["library"].text() == str(_swmain / "Library")
+              and not _swdlg.folder_widgets["pixinsight"][1].isVisibleTo(_swdlg),
+              "Suggest Folders fills a folder for each job inside the main astro folder (PixInsight only if used)")
+        shot("1d_setup_folders.png", _swdlg)
+        _swdlg.next_page()
+        QApplication.processEvents()
+        check(_swdlg.stack.currentIndex() == 2 and all((_swmain / n).is_dir() for n in
+                                                       ("Incoming", "Library", "Calibration", "Master Lights",
+                                                        "Processed", "Finished Pictures"))
+              and not (_swmain / "PixInsight Projects").exists(),
+              "Next creates the missing folders (not the PixInsight one when PixInsight isn't used)")
+        check(_sws.value("stack/cal_root") == str(_swmain / "Calibration")
+              and _sws.value("asiair/incoming") == str(_swmain / "Incoming")
+              and _sws.value("organize/src") == str(_swmain / "Incoming")
+              and _sws.value("auto_org/dst") == str(_swmain / "Library")
+              and _sws.value("finish/export_dir") == str(_swmain / "Finished Pictures")
+              and str(_sws.value("organize/same")).lower() == "false" and _sws.value("finish/pi_dir") is None,
+              "the folders are saved where every page looks for them")
+        _swdlg.checker.wait(30000)
+        QApplication.processEvents()
+        check(set(_swdlg.tool_rows) == {"rcastro", "graxpert", "astap"}
+              and all("checking" not in r_.text() for r_ in _swdlg.tool_rows.values()),
+              "the setup checks RC-Astro, GraXpert and ASTAP, with Download and Find It…")
+        shot("1e_setup_tools.png", _swdlg)
+        _swdlg.next_page()
+        _swdlg.lat.setValue(32.78)
+        _swdlg.lon.setValue(-96.8)
+        _swdlg.next_page()
+        QApplication.processEvents()
+        _swsum = _swdlg.summary.text()
+        check(_swdlg.b_next.text() == "Finish" and "Library" in _swsum and "RC-Astro" in _swsum
+              and "32.78" in _swsum, "the last page sums up the computer, folders, helpers and location")
+        shot("1f_setup_done.png", _swdlg)
+        fits_small(_swdlg, "the setup wizard")
+        # with My Profile, an unchanged folder must not count as a change made on this computer
+        _swwrites = []
+        _sw_orig = _sws.setValue
+        _sws.setValue = lambda k_, v_: (_swwrites.append(k_), _sw_orig(k_, v_))
+        _sw.save_folders(_sws, _swdlg.folders(), False)
+        _sws.setValue = _sw_orig
+        check(_swwrites == [], f"saving the same folders again changes nothing ({_swwrites})")
+        _swdlg.next_page()
+        QApplication.processEvents()
+        check(_swdlg.result() == 1 and _sws.value(_sw.DONE_KEY, False, type=bool)
+              and abs(float(_sws.value("picker/lat")) - 32.78) < 1e-6 and not _sw.is_new_install(_sws),
+              "Finish saves the location and the setup does not open by itself again")
+        _swd2 = _sw.SetupWizard(_sws, None)
+        check(_swd2.main_edit.text() == str(_swmain) and _swd2.folder_edits["masters"].text()
+              == str(_swmain / "Master Lights"), "running the setup again shows the folders already chosen")
+        _swd2.later()
+        _swd2.deleteLater()
+        _swdlg.deleteLater()
         fits_small(w, "page 1 (Quality and Cull)")
         _g = w.geometry()
         w.setGeometry(_g.x() - 500, _g.y() - 400, 4000, 3000)

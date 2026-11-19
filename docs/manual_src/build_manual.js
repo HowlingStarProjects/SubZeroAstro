@@ -236,7 +236,19 @@ sec("3.4", "Removing SubZeroAstro", ["Uninstall"]);
 p("Delete the app folder (Windows) or drag SubZeroAstro from Applications to the Bin (Mac). Saved progress can be cleared first under **Settings › Saved Progress**. Your images are never touched.");
 
 ch(4, "First-time setup");
-p("**Your setup checklist.** SubZeroAstro works out of the box, but these few steps - once, about half an hour - switch on everything it can do:");
+sec("4.0", "The setup wizard", ["Setup wizard", "Set Up SubZeroAstro", "First start", "Main AstroComputer", "Folders", "Main astro folder"]);
+p("The first time SubZeroAstro starts on a computer, **Set Up SubZeroAstro** opens by itself and walks you through five short pages. **Not Now** closes it; **Settings › Set Up SubZeroAstro…** brings it back any time, with your current choices filled in. Nothing is moved or deleted - the wizard only creates the folders you choose and remembers them.");
+steps([
+  "**Your main AstroComputer.** Pick the computer you want as your main AstroComputer - usually the one that stays on, sees your NAS or big drive, and fetches and files new subs by itself - and do the whole setup on that computer. On a laptop or second PC, choose *This is another computer*: if you use **My Profile**, **Use My Profile From the NAS…** gives it the main computer's folders, rigs and choices.",
+  "**Your folders.** Pick one **main folder for your astro work** (for example `D:\\Astro`, or a folder on your NAS) and click **Suggest Folders**: SubZeroAstro proposes a folder for each job inside it - **Incoming** (new subs from the ASIAIR or N.I.N.A.), **Library** (your organized subs), **Calibration** (darks, flats and bias), **Master Lights** (stacked pictures), **Processed** (Astro Image Processing), **Finished Pictures** (your final pictures) and, if you tick *I use PixInsight too*, **PixInsight Projects**. Change any of them with **Browse…** if you already have folders you like. **Next** creates the ones that don't exist yet, and every page of SubZeroAstro then starts in the right place.",
+  "**Your helper programs.** RC-Astro (BlurXTerminator, NoiseXTerminator, StarXTerminator), GraXpert and ASTAP, each with a green tick when it's ready. **Download** opens its web page; after installing, click **Check Again**, or **Find It…** if it's somewhere unusual. **Activate…** enters your RC-Astro licence code. For ASTAP, also install a star catalog (D50 for most telescopes). All of them are optional (4.1).",
+  "**Where you observe from.** Your latitude and longitude, for Tonight's Targets and the weather (optional; 6.5).",
+  "**All set.** A summary of everything with ticks, and what to do next: name your rigs, then open your first night's subs.",
+]);
+img("1d_setup_folders.png", "Set Up SubZeroAstro: one main astro folder, with a folder for each job inside it");
+img("1e_setup_tools.png", "Set Up SubZeroAstro: your helper programs, with Download, Find It… and Activate…");
+tip("Do the setup on your main AstroComputer first. Then a second computer can share the same folders on the NAS (and, with My Profile, the same settings) without you typing them again.", "Main AstroComputer first");
+p("**Your setup checklist.** The wizard covers the first steps; these few more - once, about half an hour - switch on everything SubZeroAstro can do:");
 steps([
   "**Install the helper programs** (all optional, all recommended): **ASTAP** *and a star database for it* (D50 for most telescopes, W08 too for wide lenses - ASTAP can't plate solve without one), **GraXpert**, and the **RC-Astro CLI** with your BlurXTerminator, NoiseXTerminator and StarXTerminator licences. **Settings › Your Tools…** shows what's found and has a Download Page button for each (4.1).",
   "**Name your rigs**: **Settings › My Rigs…** (also in the File menu, and Your Rigs… in the Organize window) - one row per rig with its focal length; **From N.I.N.A.…** fills them in from N.I.N.A.'s profiles (4.5, 13.3). Organize, Calibrate and Stack and Fetch From My ASIAIRs all use these names.",
@@ -300,6 +312,7 @@ bullets([
 ]);
 sec("4.4", "Settings worth knowing", ["Settings", "Intro animation", "Saved progress", "Star measurement"]);
 bullets([
+  "**Settings › Set Up SubZeroAstro…** - the setup wizard again: main AstroComputer, folders, helper programs and location (4.0).",
   "**Settings › Star measurement** - *Fast* (default, about 3-4× quicker on a network drive), *Full frame* or *Off*.",
   "**Settings › Your Tools (ASTAP, GraXpert, RC-Astro)…** - see, locate and download the helper programs, and activate RC-Astro licences (4.1).",
   "**Settings › Saved Progress…** - where crash-recovery copies are kept, how much space they use and how long they are kept (30 days by default).",

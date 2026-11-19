@@ -1005,6 +1005,23 @@ class MainWindow(QMainWindow):
             self._target_key, self._target_names = key, names
         return self._target_names
 
+    def open_setup(self, first_run=False):
+        """Settings › Set Up SubZeroAstro… (and by itself on a brand-new install)."""
+        import setup_wizard
+        dlg = setup_wizard.SetupWizard(self.settings, self, first_run=first_run)
+        dlg.exec()
+        if dlg.results:
+            self.tools_banner.show_results(dlg.results)
+        return dlg
+
+    def maybe_first_run(self):
+        """A brand-new install: the setup wizard first; otherwise offer to pick up where you left off."""
+        import setup_wizard
+        if setup_wizard.is_new_install(self.settings):
+            self.open_setup(first_run=True)
+        else:
+            self.offer_resume()
+
     def open_tools(self):
         import tool_check
         dlg = tool_check.ToolsDialog(self.settings, self, self.tools_banner.results or None)
@@ -1489,6 +1506,13 @@ class MainWindow(QMainWindow):
         m.addAction(self.act_fit)
         m.addAction(self.act_100)
         m = mb.addMenu("&Settings")
+        a = QAction("Set Up SubZeroAstro…", self)
+        a.setToolTip("The setup wizard: your main AstroComputer, your folders, your helper programs and where you "
+                     "observe from")
+        a.triggered.connect(lambda: self.open_setup())
+        m.addAction(a)
+        self.act_setup = a
+        m.addSeparator()
         sm = m.addMenu("Star measurement")
         for a in self.mode_actions.values():
             sm.addAction(a)
@@ -3854,7 +3878,7 @@ def main():
         w.raise_()
         w.activateWindow()
         if len(sys.argv) <= 1 and not upd_failed:
-            QTimer.singleShot(400, w.offer_resume)
+            QTimer.singleShot(400, w.maybe_first_run)
         if upd_failed:
             QTimer.singleShot(600, lambda: QMessageBox.information(
                 w, "Update SubZeroAstro",
