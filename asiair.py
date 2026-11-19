@@ -403,11 +403,24 @@ def fetch(unit: dict, incoming, progress=None, stop=None, free=False, now=None, 
             break
         except Exception as e:  # noqa: BLE001
             _quiet_unlink(tmp)
-            rep["failed"].append((rel, str(e)))
+            rep["failed"].append((rel, plain_error(e)))
         if i % 25 == 0:
             save_manifest(name, seen)
     save_manifest(name, seen)
     return rep
+
+
+def plain_error(e) -> str:
+    """A copy error in plain words. Windows says '[Errno 22] Invalid argument' (or 'The specified network name is no
+    longer available', WinError 64/59/121) when the Wi-Fi link to the ASIAIR drops in the middle of a sub."""
+    n = getattr(e, "winerror", None) or getattr(e, "errno", None)
+    if n in (22, 53, 59, 64, 67, 121, 1231) or isinstance(e, (ConnectionError, TimeoutError)):
+        return "the connection to the ASIAIR broke while copying (a weak or dropping Wi-Fi link)"
+    if n in (28, 112):
+        return "the incoming folder is full"
+    if n in (5, 13):
+        return "not allowed to write to the incoming folder"
+    return str(e)
 
 
 def _quiet_unlink(p):
