@@ -555,6 +555,59 @@ def _starts_with(p) -> str:
         return ""
 
 
+def what_it_is(p) -> str:
+    """What a file that won't open really is, in plain words, from its first bytes: a .jpg or .png with a FITS name,
+    an XISF file, a zip, a text file, a copy cut short (the start missing) - so you know what to do with it."""
+    try:
+        size = Path(p).stat().st_size
+        with open(p, "rb") as f:
+            b = f.read(4096)
+    except OSError as e:
+        return f"it can't be opened ({e})"
+    if not b:
+        return "it is empty (0 bytes)"
+    kinds = ((b"\xff\xd8\xff", "it is really a .jpg picture with a FITS name"),
+             (b"\x89PNG", "it is really a .png picture with a FITS name"),
+             (b"II*\x00", "it is really a TIFF picture with a FITS name"),
+             (b"MM\x00*", "it is really a TIFF picture with a FITS name"),
+             (b"XISF0100", "it is really a PixInsight XISF file with a FITS name"),
+             (b"PK\x03\x04", "it is really a zip file with a FITS name"),
+             (b"\x1f\x8b", "it is a gzip-compressed file (.fits.gz) - unzip it first"),
+             (b"\x00\x05\x16\x07", "it is a Mac side-file (._name), not a picture - safe to delete"),
+             (b"BM", "it is really a .bmp picture with a FITS name"))
+    for magic, words in kinds:
+        if b.startswith(magic):
+            return words
+    if b"SIMPLE  =" in b[:2880] or b"SIMPLE =" in b[:2880]:
+        return "its FITS header starts part way in - the start of the file is damaged (a copy cut short?)"
+    if not b.strip(b"\0"):
+        return "it starts with nothing but zeros - the header was never written (a copy or capture cut short)"
+    txt = sum(1 for x in b[:512] if 32 <= x < 127 or x in (9, 10, 13))
+    if txt >= 0.95 * min(len(b), 512):
+        return "it holds plain text, not a picture (a text or program file saved under a picture's name)"
+    return f"it isn't a picture SubZeroAstro knows ({size / 1e6:.1f} MB) - see the first bytes in the log"
+
+
+def unread_where(items, top=3) -> list:
+    """The files that couldn't be read, grouped: [(folder, count, what they are)] - most first - so the plan can say
+    where they are and what they really are without anyone copying a path by hand."""
+    import collections
+    groups = collections.defaultdict(list)
+    for it in items:
+        if it.status == "error":
+            groups[str(Path(it.src).parent)].append(it)
+    out = []
+    for folder, its in sorted(groups.items(), key=lambda kv: -len(kv[1]))[:top]:
+        whats = collections.Counter()
+        for it in its:
+            w = it.why or ""
+            if w.startswith("could not read it - "):
+                w = w[len("could not read it - "):].split(" (", 1)[0]
+            whats[w.split(" - ")[0] if not w.startswith("it ") else w] += 1
+        out.append((folder, len(its), whats.most_common(1)[0][0] if whats else ""))
+    return out
+
+
 def classify(paths, read_info=None, progress=None, stop=None, library=None, rigs=None, layout="rig",
              root=None, riglist=None, tol=0.03) -> list:
     """Read each header and decide where the file belongs (relative to the library). Returns [Item].
@@ -600,8 +653,8 @@ def classify(paths, read_info=None, progress=None, stop=None, library=None, rigs
             it = Item(src=Path(p))
             it.size = size
             if err is not None:
-                it.status, it.why = "error", (_empty_reason(p) or f"could not read it ({err}) - it starts with "
-                                                                     f"{_starts_with(p)}")
+                it.status, it.why = "error", (_empty_reason(p) or f"could not read it - {what_it_is(p)} ({err}; "
+                                                                     f"it starts with {_starts_with(p)})")
                 items.append(it)
                 infos.append(None)
                 continue
