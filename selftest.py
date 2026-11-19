@@ -1784,6 +1784,21 @@ def run(app, out_dir: Path) -> int:
     check(_mp is not None and _mp.stat().st_size > 100000 and _hm is not None
           and any("User Manual" in x.text() for x in _hm.actions()),
           f"Help > User Manual (PDF) is there and the manual ships with the app ({_mp})")
+    _jk_texts = [a.text() for a in _hm.actions()] if _hm is not None else []
+    _jk_msgs = []
+    for _jk_key in ("clouds", "bortle"):
+        _jk_act = getattr(w, "joke_actions", {}).get(_jk_key)
+        if _jk_act is not None:
+            _jk_act.trigger()
+            QApplication.processEvents()
+            _jk_box = getattr(w, "_joke_box", None)
+            _jk_msgs.append(_jk_box.text() if _jk_box is not None else "")
+            if _jk_box is not None:
+                _jk_box.close()
+                QApplication.processEvents()
+    check("Make Clouds Disappear" in _jk_texts and "Make My Bortle Better" in _jk_texts
+          and len(_jk_msgs) == 2 and all("Coming soon... Not!" in _jk_t for _jk_t in _jk_msgs),
+          f"Help > Make Clouds Disappear / Make My Bortle Better answer 'Coming soon... Not!' ({_jk_msgs})")
     check(_uh.app_icon_path() is not None and not QApplication.windowIcon().isNull(),
           f"the SubZeroAstro icon ships with the app and is set on the windows ({_uh.app_icon_path()})")
     w.show()
