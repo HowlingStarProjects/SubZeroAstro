@@ -483,6 +483,7 @@ def _finish(rep, s, base):
     text = describe(rep)
     try:
         s.setValue("auto_org/last", text)
+        s.setValue("auto_org/last_time", rep.get("time", ""))
         s.setValue("auto_org/last_html", describe_html(rep))
         s.sync()
     except Exception:  # noqa: BLE001
@@ -583,6 +584,45 @@ def start_background() -> tuple:
         return True, ""
     except OSError as e:
         return False, str(e)
+
+
+def command_text() -> str:
+    return " ".join(_command())
+
+
+def keep_schedule_current(settings=None) -> str:
+    """Automatic organizing starts SubZeroAstro from the folder it was in when it was switched on. A new copy
+    unzipped somewhere else (Downloads\\SubZeroAstro-Windows (4)...) would leave the morning run starting the old
+    copy - or nothing, once that folder is deleted. At each start: on here, and the app has moved since? Point the
+    schedule at this copy. Returns what was done ("" = nothing needed)."""
+    s = settings or _settings()
+    cfg = load_config(s)
+    if not cfg["on"] or sys.platform not in ("win32", "darwin"):
+        return ""
+    now_cmd = command_text()
+    if (s.value("auto_org/exe", "") or "") == now_cmd:
+        return ""
+    ok, msg = schedule(cfg)
+    if ok:
+        s.setValue("auto_org/exe", now_cmd)
+        s.sync()
+        _note(f"automatic organizing now starts {now_cmd}")
+        return "moved"
+    return f"failed: {msg}"
+
+
+def unfinished(settings, now=None) -> str:
+    """When the last automatic run that started, but never finished, began ("" = none): it was stopped part way -
+    SubZeroAstro closed or updated, or the computer switched off - so it never wrote its 'Last automatic run'."""
+    try:
+        st = json.loads(settings.value("auto_org/now", "") or "null")
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(st, dict) or running_status(settings, now) is not None:
+        return ""
+    began = str(st.get("started", ""))
+    last = str(settings.value("auto_org/last_time", "") or "") or str(settings.value("auto_org/last", "") or "")[:16]
+    return began if began and began > last else ""
 
 
 def unschedule() -> tuple:

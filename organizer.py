@@ -566,6 +566,12 @@ def what_it_is(p) -> str:
         return f"it can't be opened ({e})"
     if not b:
         return "it is empty (0 bytes)"
+    name = Path(p).name.lower()
+    if name.startswith(("temp", "tmp", "~")) or name.endswith((".tmp", ".part", ".partial", ".fetching", ".crdownload")):
+        if not (b.startswith(b"SIMPLE  =") or b.startswith(b"SIMPLE =")):
+            return ("it is an unfinished copy (its name marks it as a temporary file a copying program - such as "
+                    "N.I.N.A.'s Remote Copy - writes before the real file); the finished sub is usually there under "
+                    "its proper name - if it is, delete this one, else copy that sub again from the capture computer")
     kinds = ((b"\xff\xd8\xff", "it is really a .jpg picture with a FITS name"),
              (b"\x89PNG", "it is really a .png picture with a FITS name"),
              (b"II*\x00", "it is really a TIFF picture with a FITS name"),
