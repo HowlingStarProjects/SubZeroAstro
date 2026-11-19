@@ -145,7 +145,7 @@ table(["Feature", "What it does for you", "Where"], [
   ["Real-time guiding analysis", "The guiding RMS N.I.N.A. recorded for every sub - shown, charted and used in culling.", "6.2"],
   ["Fast Track after the night", "N.I.N.A. starts Fast Track when its sequence ends: a finished picture waiting in the morning.", "4.5"],
   ["Organize and re-organize your data", "Every rig's subs filed by rig or target, night and filter - on a schedule, from a NAS; a library re-sorted in place; every run undoable.", "13.3"],
-  ["Fitz'r Squeezer", "Raw subs shrunk to half their size or less without losing a bit - still open everywhere; Unsqueeze any time.", "13.4"],
+  ["Fitz'r Squeezer", "Raw subs shrunk to half their size or less without losing a bit - still open everywhere; Unsqueeze any time.", "13.5"],
   ["Image QC and culling", "Every sub measured and badged against its own filter, a session chart, three Auto-cull strengths.", "Chapter 6"],
   ["Filter names, FITS headers, viewer", "Add or correct the filter of any subs; edit headers across many files with undo; a FITS and XISF viewer.", "6.4"],
   ["Calibration masters built for you", "Bias, darks, flats and dark-flats turned into masters, no lights needed, then matched to each night automatically.", "Chapter 7"],
@@ -946,7 +946,7 @@ bullets([
   "**On a Mac** the share must be connected (Finder › Go › Connect to Server…) to appear under */Volumes*; tick *Remember this password in my keychain* the first time, so automatic runs can reconnect it.",
 ]);
 
-sec("13.4", "Fitz'r Squeezer: free disk space", ["Fitz'r Squeezer", "Squeeze", "Unsqueeze", "Free disk space", "Compressed FITS", "Rice compression", ".fz files"]);
+sec("13.5", "Fitz'r Squeezer: free disk space", ["Fitz'r Squeezer", "Squeeze", "Unsqueeze", "Free disk space", "Compressed FITS", "Rice compression", ".fz files"]);
 p("Raw subs are what fill a drive. **File › Fitz'r Squeezer (Free Disk Space)…** shrinks them to about half their size or less - typically 40-50 % for a 16-bit camera - **without losing a single bit**. It uses FITS's own lossless compression (Rice, the same one fpack, N.I.N.A. and Siril write), so the files keep their names and still open in SubZeroAstro, PixInsight, Siril, N.I.N.A. and ASTAP like any other FITS file. Nothing about the picture or its header changes; it only takes less room.");
 steps([
   "**Tick the folders** to include. Your organized library is always in the list (open it with the arrows: rig, target, night, filter); a ticked folder includes every folder inside it. **Add Another Folder…** adds any other folder - another drive or an old archive.",
