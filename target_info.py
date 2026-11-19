@@ -21,7 +21,7 @@ except ImportError:          # pragma: no cover
 import targets
 
 API = "https://en.wikipedia.org/w/api.php"
-UA = "SubZeroAstro (https://github.com/HowlingStarProjects/SubZeroAstro) astrophotography app"
+UA = "SubZeroAstro (https://subzeroastro.com) astrophotography app"
 LICENCE = "CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/)"
 
 

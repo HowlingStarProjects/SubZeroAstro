@@ -4511,6 +4511,28 @@ def run(app, out_dir: Path) -> int:
               and _up.asset_name("darwin") == "SubZeroAstro-macOS-AppleSilicon.zip",
               f"updates: the newest published release for this computer is found ({_nr and _nr['tag']}); "
               f"drafts, older versions and other platforms are ignored")
+        # both release lists are read (the public downloads repo first); one that can't be read is skipped
+        _usrc = {"dl": [_rels[2]], "old": [_rels[3], {"tag_name": "v9.0.131-beta", "assets": [{"name": _an}]}]}
+
+        def _uget(url, timeout):
+            if url == "gone":
+                raise OSError("HTTP Error 404: Not Found")
+            return _usrc[url]
+        _umerged = _up.fetch_releases(sources=["dl", "gone", "old"], get=_uget)
+        _unr = _up.newest_release(_umerged, "0.9.120 beta")
+        _uall_fail = None
+        try:
+            _up.fetch_releases(sources=["gone", "gone"], get=_uget)
+        except OSError as e:
+            _uall_fail = str(e)
+        check(len(_umerged) == 3 and _unr is not None and _unr["tag"] == "v9.0.131-beta"
+              and _up.fetch_releases(sources=["gone", "dl"], get=_uget) == [_rels[2]]
+              and _uall_fail is not None and "404" in _uall_fail
+              and _up.SOURCES[0].startswith("https://api.github.com/repos/HowlingStarProjects/SubZeroAstro-Downloads/")
+              and "SubZeroAstro-Downloads" in _up.PAGE,
+              f"updates: the public downloads list and the old list are both read and the newest wins "
+              f"({_unr and _unr['tag']}); a list that can't be read (gone private) is skipped, and only when "
+              f"none can be read does Check for Updates say so ({_uall_fail})")
         _ub = w.update_banner
         _ub.settings.remove(_up.SKIP_KEY)
         _ub.start_check(manual=True, fetch=lambda: _rels)

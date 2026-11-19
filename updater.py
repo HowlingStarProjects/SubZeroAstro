@@ -1,7 +1,9 @@
 """In-app updates: is a newer SubZeroAstro on GitHub, and 'Update Now' to install it.
 
-New versions are published as GitHub Releases of HowlingStarProjects/SubZeroAstro, each with a zipped app per
-platform (SubZeroAstro-Windows.zip, SubZeroAstro-macOS-AppleSilicon.zip). On start-up (unless turned
+New versions are published as GitHub Releases in the public downloads repo HowlingStarProjects/SubZeroAstro-Downloads
+(and, while it is still public, in HowlingStarProjects/SubZeroAstro itself), each with a zipped app per platform
+(SubZeroAstro-Windows.zip, SubZeroAstro-macOS-AppleSilicon.zip). Both lists are read and the newest version wins,
+so the check keeps working when the code repository goes private (it then simply isn't found). On start-up (unless turned
 off) the newest release is looked up in the background; when it is newer than this copy, a slim blue
 banner on page 1 offers What's New / Update Now / Skip This Version.
 
@@ -27,8 +29,10 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QMessageBox, QProgressDialog,
                                QToolButton)
 
-REPO = "HowlingStarProjects/SubZeroAstro"
-API = f"https://api.github.com/repos/{REPO}/releases?per_page=20"
+REPO = "HowlingStarProjects/SubZeroAstro-Downloads"       # public: the zips and release notes only
+OLD_REPO = "HowlingStarProjects/SubZeroAstro"               # the code; read too until it goes private
+SOURCES = [f"https://api.github.com/repos/{r}/releases?per_page=20" for r in (REPO, OLD_REPO)]
+API = SOURCES[0]
 PAGE = f"https://github.com/{REPO}/releases/latest"
 UA = "SubZeroAstro-updater"
 AUTO_KEY = "update/auto_check"          # check at start-up (on unless turned off)
@@ -77,11 +81,30 @@ def newest_release(releases, current, platform: str | None = None) -> dict | Non
     return best
 
 
-def fetch_releases(timeout=15) -> list:
+def _get_json(url, timeout=15):
     from target_info import ssl_context       # certifi-backed: works inside the packaged Mac app too
-    req = urllib.request.Request(API, headers={"User-Agent": UA, "Accept": "application/vnd.github+json"})
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as r:
         return json.loads(r.read().decode("utf-8"))
+
+
+def fetch_releases(timeout=15, sources=None, get=None) -> list:
+    """The releases of every source put together. A source that can't be read (not created yet, gone private,
+    no network) is skipped; only when none can be read is the last error raised."""
+    get = get or _get_json
+    found, error, ok = [], None, False
+    for url in (SOURCES if sources is None else sources):
+        try:
+            data = get(url, timeout)
+        except Exception as e:  # noqa: BLE001
+            error = e
+            continue
+        if isinstance(data, list):
+            ok = True
+            found.extend(r for r in data if isinstance(r, dict))
+    if not ok and error is not None:
+        raise error
+    return found
 
 
 # ------------------------------------------------------------------ where this copy lives
