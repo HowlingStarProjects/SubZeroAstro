@@ -45,7 +45,7 @@ from chart import ChartPoint, SessionChart, filter_color
 
 APP_NAME = "SubZeroAstro"
 APP_TAGLINE = "From subs to masters - zero hassle."
-APP_VERSION = "0.9.286 beta"
+APP_VERSION = "0.9.287 beta"
 ORGANIZER_ENABLED = True       # File › Organize My Astro Files…
 ui_header.APP_VERSION = APP_VERSION       # shown in small print under the name on every page
 APP_AUTHOR = "Brian A. Poteet, DVM"
@@ -1757,6 +1757,16 @@ class MainWindow(QMainWindow):
         inc = (self.settings.value("asiair/incoming", "") or "").strip()
         if not units or not inc:
             return
+        try:                                         # another computer took the automatic jobs over: step aside
+            import one_computer as J
+            why = J.check_run(J.library(self.settings), "asiair_night")
+        except Exception:  # noqa: BLE001
+            why = ""
+        if why:
+            self.asiair_stood_down = "Overnight ASIAIR fetch " + why
+            self.statusBar().showMessage(self.asiair_stood_down, 60000)
+            return
+        self.asiair_stood_down = ""
         free = self.settings.value("asiair/free", False, type=bool)
         self.asiair_job = _Job(lambda job: A.fetch_all(units, inc, stop=lambda: job.stop, free=free))
 

@@ -185,6 +185,13 @@ class AsiairDialog(QDialog):
         return out
 
     def save(self):
+        import one_computer as J
+        lib = J.library(self.settings)
+        if self.night.isChecked():                   # one computer only runs the automatic jobs for a library
+            if not J.ask_take_over(self, self.settings, "asiair_night", lib=lib):
+                self.night.setChecked(False)
+        else:
+            J.release(lib, "asiair_night")
         A.save_units(self.settings, self.units())
         self.settings.setValue("asiair/incoming", self.incoming.text().strip())
         self.settings.setValue("asiair/free", self.free.isChecked())

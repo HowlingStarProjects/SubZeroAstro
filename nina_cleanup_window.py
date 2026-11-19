@@ -144,6 +144,13 @@ class NinaCleanupDialog(QDialog):
                               "(nothing can be checked without it).")
 
     def save(self):
+        import one_computer as J
+        lib = J.library(self.settings)
+        if self.with_auto.isChecked():               # one computer only runs the automatic jobs for a library
+            if not J.ask_take_over(self, self.settings, "nina_clean", lib=lib):
+                self.with_auto.setChecked(False)
+        else:
+            J.release(lib, "nina_clean")
         NC.save_list(self.settings, self.computers())
         self.settings.setValue("nina_clean/with_auto", self.with_auto.isChecked())
 

@@ -1637,14 +1637,30 @@ class AutoDialog(QDialog):
         if not self._check(cfg):
             return
         self._remember_mounts(cfg)
+        import one_computer as J
+        if not J.ask_take_over(self, self.settings, "organize", lib=cfg["dst"]):
+            other = J.other_owner(cfg["dst"]) or {}
+            self.note.setText(f"<b>Not turned on here.</b> The automatic jobs for this library keep running on "
+                              f"{other.get('computer') or 'the other computer'} - run them from one computer only.")
+            return
         ok, msg = self.A.schedule(cfg)
         cfg["on"] = ok
+        old = (self.settings.value("auto_org/dst", "") or "").strip()
         self.A.save_config(cfg, self.settings)
+        if not ok:
+            J.release(cfg["dst"], "organize")
+        elif old and old != cfg["dst"]:
+            J.release(old, "organize")               # a new library: the old one no longer names this computer
         self.note.setText(("<b>On.</b> " + msg) if ok else f"<b>Could not set it up:</b> {msg}")
 
     def turn_off(self):
         self.A.unschedule()
         self.A.save_config({"on": False}, self.settings)
+        try:
+            import one_computer as J
+            J.release(self.A.load_config(self.settings).get("dst", ""), "organize")
+        except Exception:  # noqa: BLE001
+            pass
         self.note.setText("<b>Off.</b> Nothing will run by itself.")
 
     def run_now(self, wait=False):
