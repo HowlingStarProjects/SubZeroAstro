@@ -506,6 +506,58 @@ def fit_text(fill) -> str:
     return f"fits ({fill * 100:.0f}% of the frame)"
 
 
+MOSAIC_OVERLAP = 0.2          # neighbouring panels share this part of the frame (stars to line them up by)
+
+
+def mosaic_plan(t: Target, fov, overlap=MOSAIC_OVERLAP, margin=1.1):
+    """Panels for a target bigger than the frame: {"cols", "rows", "overlap", "panels": [(n, ra, dec)]} with the
+    camera's long side along the target's long side, north up and east left, panels numbered from the top left
+    (as N.I.N.A.'s Framing Assistant does); None when it fits in one frame. A little margin round the target."""
+    if not fov or not t.size:
+        return None
+    W, H = float(fov[0]), float(fov[1])
+    a = float(t.size) * margin
+    b = float(t.size_min or t.size) * margin
+    step_w, step_h = W * (1 - overlap), H * (1 - overlap)
+    cols = max(1, math.ceil((a - W * overlap) / step_w - 1e-9))
+    rows = max(1, math.ceil((b - H * overlap) / step_h - 1e-9))
+    if cols * rows < 2:
+        return None
+    if cols * rows > 36:
+        return {"cols": cols, "rows": rows, "overlap": overlap, "panels": [], "too_many": True}
+    cosd = max(math.cos(math.radians(t.dec)), 1e-3)
+    panels = []
+    n = 0
+    for r in range(rows):
+        for c in range(cols):
+            n += 1
+            dx = (c - (cols - 1) / 2.0) * step_w / 60.0          # degrees, west is to the right
+            dy = (r - (rows - 1) / 2.0) * step_h / 60.0          # degrees, south is down
+            panels.append((n, (t.ra - dx / cosd) % 360.0, max(-90.0, min(90.0, t.dec - dy))))
+    return {"cols": cols, "rows": rows, "overlap": overlap, "panels": panels, "too_many": False}
+
+
+def mosaic_text(plan) -> str:
+    if not plan:
+        return ""
+    if plan.get("too_many"):
+        return f"{plan['cols']} × {plan['rows']} panels - a very big mosaic"
+    return f"{plan['cols']} × {plan['rows']} panels, {plan['overlap'] * 100:.0f}% overlap"
+
+
+def mosaic_targets(t: Target, plan) -> list:
+    """One Target per panel ('M31 Panel 1', …) at the panel's centre - for Send Mosaic Panels to N.I.N.A."""
+    import copy
+    out = []
+    for n, ra, dec in (plan or {}).get("panels", []):
+        p = copy.copy(t)
+        p.ra, p.dec = ra, dec
+        p.name = f"{t.name} Panel {n}"
+        p.common = f"{t.common or t.name} Panel {n}"
+        out.append(p)
+    return out
+
+
 def nina_coords(t: Target) -> str:
     """RA / Dec as N.I.N.A. accepts them (J2000): '00h 42m 44s  +41° 16' 08"'."""
     h = t.ra / 15

@@ -5648,6 +5648,24 @@ def run(app, out_dir: Path) -> int:
               f"Send to N.I.N.A. writes targets into N.I.N.A.'s target list ({_pw1[0].name if _pw1 else '-'}), and "
               f"with one of your own as the template keeps its steps and moves every coordinate to the new target "
               f"({_pw2[0].name if _pw2 else '-'})")
+        import target_picker as _tp_mz
+        # a target bigger than the frame: its mosaic panels, one N.I.N.A. target each (600 mm: M 31 needs two)
+        _pwin.focal.setValue(600)
+        _pmz_plan = _tp_mz.mosaic_plan(_pm.target, _pwin.fov())
+        _pmz = _pwin.send_mosaic_to_nina(folder=_pnf, ask=False) or []
+        _pmz_docs = [_pj.loads(f_.read_text(encoding="utf-8")) for f_ in _pmz]
+        _pmz_ra = [d_["Target"]["InputCoordinates"]["RAHours"] * 60 + d_["Target"]["InputCoordinates"]["RAMinutes"]
+                   for d_ in _pmz_docs]
+        _pwin.focal.setValue(360)
+        _pmz_none = _tp_mz.mosaic_plan(_pm.target, _pwin.fov())
+        check(_pmz_plan and _pmz_plan["cols"] == 2 and _pmz_plan["rows"] == 1 and len(_pmz) == 2
+              and [d_["Target"]["TargetName"] for d_ in _pmz_docs] == ["Andromeda Galaxy Panel 1",
+                                                                     "Andromeda Galaxy Panel 2"]
+              and _pmz_ra[0] > _pmz_ra[1] and _pmz_docs[0]["Items"]["$values"][-1].get("ExposureTime") == 300.0
+              and _pmz_none is None,
+              f"Target Picker › Send Mosaic Panels to N.I.N.A.: a target bigger than the frame gets "
+              f"{_tp_mz.mosaic_text(_pmz_plan)}, one N.I.N.A. target per panel from the template, east on the left "
+              f"({[f_.name for f_ in _pmz]}); at 360 mm it fits in one frame")
         _pwin.find.setText("")
         # My Rigs in the picker: a rig fills in its focal length and its camera's sensor; what you type is kept
         _prl0 = _pwin.settings.value("organize/riglist", "[]")
