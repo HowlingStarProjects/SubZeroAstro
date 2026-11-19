@@ -224,6 +224,9 @@ class ImgInfo:
     totalexp: float | None = None
     smart: str | None = None
     precal: str | None = None           # already calibrated (ready-made data): why we think so
+    ra: float | None = None             # where the telescope pointed (degrees), from RA / DEC or OBJCTRA / OBJCTDEC
+    dec: float | None = None
+    scale: float | None = None          # arcsec per pixel (focal length and pixel size)
 
     @property
     def exposure_total(self) -> float:
@@ -242,9 +245,34 @@ def _num(v):
         return None
 
 
+def _sexa_deg(v, hours=False):
+    """'05 35 17.3' / '+22:00:52' / 83.8 -> degrees (hours x 15 for RA), or None."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    parts = [p for p in re.split(r"[\s:hdms°'\"]+", str(v or "").strip()) if p]
+    try:
+        sign = -1.0 if parts[0].startswith("-") else 1.0
+        nums = [abs(float(parts[0]))] + [float(x) for x in parts[1:3]]
+    except (ValueError, IndexError):
+        return None
+    val = nums[0] + (nums[1] / 60 if len(nums) > 1 else 0) + (nums[2] / 3600 if len(nums) > 2 else 0)
+    return sign * val * (15.0 if hours else 1.0)
+
+
+def pointing_of(look: dict):
+    """(ra, dec) in degrees where the telescope pointed, from the header, or (None, None)."""
+    ra, dec = _num(look.get("RA")), _num(look.get("DEC"))
+    if ra is None or dec is None:
+        ra, dec = _sexa_deg(look.get("OBJCTRA"), hours=True), _sexa_deg(look.get("OBJCTDEC"))
+    if ra is None or dec is None or not (-90.0 <= dec <= 90.0) or (ra == 0 and dec == 0):
+        return None, None
+    return ra % 360.0, dec
+
+
 def info_from_look(path, look, w, h, typ=None, master=False, planes=1, cards=None) -> ImgInfo:
     fi = core.frame_info(look)
     xb = _num(look.get("XBINNING") or look.get("CCDXBIN"))
+    ra, dec = pointing_of(look)
     return ImgInfo(
         path=Path(path), type=typ, master=master,
         camera=(str(fi["camera"]).strip() if fi.get("camera") else None),
@@ -265,7 +293,8 @@ def info_from_look(path, look, w, h, typ=None, master=False, planes=1, cards=Non
         planes=int(planes or 1), stackcnt=int(_num(fi.get("stackcnt"))) if _num(fi.get("stackcnt")) else None,
         totalexp=_num(fi.get("totalexp")), smart=fi.get("smart"),
         precal=(core.precalibrated(cards, look, Path(path).name) if (typ in (None, "light") and not master)
-                else None))
+                else None),
+        ra=ra, dec=dec, scale=_num(fi.get("scale")))
 
 
 _FOLDER_KIND = [("darkflat", r"\b(dark[\s_-]*flats?|flat[\s_-]*darks?)\b"), ("flat", r"\bflats?\b"),
@@ -739,9 +768,74 @@ def group_lights(lights: list[LightFrame], rigs: Rigs) -> list[LightGroup]:
     out = []
     for key, lst in groups.items():
         lst.sort(key=lambda f: (f.info.date_obs or "", str(f.info.path)))
-        out.append(LightGroup(key[0], key[1], lst[0].info.camera, key[9], lst))
+        for suffix, part in mosaic_panels(lst):
+            out.append(LightGroup(key[0] + suffix, key[1], part[0].info.camera, key[9], part))
     # per target: broadband first (L, R, G, B), then narrowband (Ha, OIII, SII)
     out.sort(key=lambda g: (g.target, g.camera or "", _filter_order(g.filter)))
+    return out
+
+
+def _sep_deg(ra1, dec1, ra2, dec2) -> float:
+    r1, d1, r2, d2 = (math.radians(v) for v in (ra1, dec1, ra2, dec2))
+    c = math.sin(d1) * math.sin(d2) + math.cos(d1) * math.cos(d2) * math.cos(r1 - r2)
+    return math.degrees(math.acos(max(-1.0, min(1.0, c))))
+
+
+PANEL_SPLIT = 0.3            # frames pointed further apart than this part of the field are different mosaic panels
+
+
+def mosaic_panels(frames: list) -> list:
+    """The frames of one target split by where the telescope pointed: a mosaic whose panels were all saved
+    under the same target name (a hand-made mosaic, or a sequencer that doesn't number its panels) would
+    otherwise be stacked as one jumbled picture. [("", frames)] when it is one field (dithering, re-centring and
+    meridian flips move it by far less); else [("-Panel1", …), ("-Panel2", …)], numbered from the top left
+    (north up, east left). Comets are never split - the telescope follows them across the sky."""
+    one = [("", frames)]
+    if len(frames) < 2:
+        return one
+    i0 = frames[0].info
+    if any(f.info.ra is None for f in frames) or not i0.scale:
+        return one
+    try:
+        import targets as _tg
+        if _tg.is_comet(i0.target or ""):
+            return one
+    except Exception:  # noqa: BLE001
+        pass
+    field = min(i0.w, i0.h) * float(i0.scale) / 3600.0
+    lim = PANEL_SPLIT * field
+    if lim <= 0:
+        return one
+    clusters = []                                   # [ra, dec, [frames]]
+    for f in frames:
+        best = None
+        for c in clusters:
+            d = _sep_deg(f.info.ra, f.info.dec, c[0], c[1])
+            if d < lim and (best is None or d < best[0]):
+                best = (d, c)
+        if best is None:
+            clusters.append([f.info.ra, f.info.dec, [f]])
+        else:
+            best[1][2].append(f)
+    if len(clusters) < 2:
+        return one
+    small = max(3, int(0.05 * len(frames)))         # a stray frame or two (a failed slew) joins the nearest panel
+    big = [c for c in clusters if len(c[2]) >= small] or [max(clusters, key=lambda c: len(c[2]))]
+    for c in clusters:
+        if c in big:
+            continue
+        near = min(big, key=lambda b: _sep_deg(c[0], c[1], b[0], b[1]))
+        near[2].extend(c[2])
+    if len(big) < 2:
+        return one
+    ra0 = big[0][0]
+    rel = lambda c: ((c[0] - ra0 + 180.0) % 360.0 - 180.0) * math.cos(math.radians(c[1]))
+    row = lambda c: -round(c[1] / lim)
+    big.sort(key=lambda c: (row(c), -rel(c)))       # top row first (north), east (larger RA) on the left
+    out = []
+    for n, c in enumerate(big, 1):
+        c[2].sort(key=lambda f: (f.info.date_obs or "", str(f.info.path)))
+        out.append((f"-Panel{n}", c[2]))
     return out
 
 

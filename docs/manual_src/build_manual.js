@@ -313,6 +313,7 @@ bullets([
 sec("4.4", "Settings worth knowing", ["Settings", "Intro animation", "Saved progress", "Star measurement"]);
 bullets([
   "**Settings › Set Up SubZeroAstro…** - the setup wizard again: main AstroComputer, folders, helper programs and location (4.0).",
+  "**Settings › My Profile…** - the same settings on every computer you use, kept in a profile on your NAS; also Export / Import My Settings (4.6).",
   "**Settings › Star measurement** - *Fast* (default, about 3-4× quicker on a network drive), *Full frame* or *Off*.",
   "**Settings › Your Tools (ASTAP, GraXpert, RC-Astro)…** - see, locate and download the helper programs, and activate RC-Astro licences (4.1).",
   "**Settings › Saved Progress…** - where crash-recovery copies are kept, how much space they use and how long they are kept (30 days by default).",
@@ -329,6 +330,31 @@ bullets([
   "**Same Framing Next Session** (also *Stack › Same Framing Next Session (N.I.N.A.)…*) - pick a plate-solved master (Astro Image Processing solves masters when ASTAP is installed) or any solved picture of the target. SubZeroAstro works out the centre of the picture and the camera's **position angle** exactly the way N.I.N.A. measures them, and **Send to N.I.N.A.** puts a target with both into N.I.N.A.'s target list (*Sequencer › Advanced › Targets › SubZeroAstro*, built from your Target Picker template if you chose one). Next session use it with *Slew, center and rotate* (with a rotator, or N.I.N.A.'s manual rotator telling you how far to turn the camera) or *Slew and center* without one, and the new frames line up with the old ones. A picture that isn't solved yet is solved by ASTAP first, from a copy - your file is not changed. **Copy Centre & Angle** copies them as text.",
   "**Guiding RMS and pier side** - with N.I.N.A.'s Session Metadata plugin, each frame's guiding is shown, charted and used in culling on Quality and Cull (6.2).",
 ]);
+
+sec("4.6", "My Profile: the same settings on every computer", ["My Profile", "Profile", "Several computers", "Settings on every computer", "Sync settings", "Export My Settings", "Import My Settings", "Backup of settings", "New computer", "Windows and Mac together"]);
+p("If you use SubZeroAstro on more than one computer - say a Windows PC in the observatory and a Mac in the house - each one normally keeps its own settings, so a rig added on one is missing on the other, and Organize on the two can point at different folders. **Settings › My Profile…** fixes that: your settings live in one small file on your NAS, and every computer that uses it has the same ones. There is no account or sign-in.");
+sub("Setting it up");
+steps([
+  "On the first computer: **Settings › My Profile… › Use a Profile on My NAS…** and pick a folder on your NAS, e.g. *\\\\astronas\\Astro\\SubZeroAstro* (Windows) or */Volumes/Astro/SubZeroAstro* (Mac). A profile is made there from this computer's settings (the file *SubZeroAstro Profile.json*).",
+  "On each other computer: the same, picking the same folder. SubZeroAstro asks before it replaces that computer's shared settings with the profile's, and keeps a copy of the old ones first (see 13.2).",
+  "That's all. From now on a change made on one computer reaches the others: SubZeroAstro brings itself up to date when it starts, every minute while it is open, when you click back into it and when it closes. A window that is already open shows the new settings the next time it is opened. **Sync Now** does it straight away, and the window shows when the last sync was.",
+]);
+sub("What is shared, and what stays on each computer");
+table(["Shared through the profile", "Kept on each computer"], [
+  ["My Rigs, your location (latitude and longitude)", "Where PixInsight, ASTAP, GraXpert and RC-Astro are installed"],
+  ["Organize choices, the incoming and library folders", "Window sizes and positions"],
+  ["The ASIAIR list and its incoming folder", "The crash-recovery (Saved Progress) folder"],
+  ["The N.I.N.A. computers to clean up and their keep-days", "The automatic jobs: Organize Automatically, the overnight ASIAIR fetch and the automatic N.I.N.A. clean-up - on or off, and when"],
+  ["Target Picker and weather, the calibration and masters folders", "The N.I.N.A. profile files added in Work With N.I.N.A."],
+  ["Processing choices on pages 1 to 4, your signature, AstroBin details", ""],
+], [4680, 4680]);
+p("The automatic jobs stay on one computer on purpose: they move and delete files, and two computers doing the same job on the same library would get in each other's way. Turn them on on the one computer that should run them (13.3).");
+sub("Windows and Mac together");
+p("One profile works for Windows and Mac computers at the same time. A NAS folder has a different name on each - *\\\\astronas\\Astro\\Library* (or *Z:\\Library* with a mapped drive) on Windows, */Volumes/Astro/Library* on a Mac - and SubZeroAstro translates it for each computer. On the Mac, connect to the NAS share in Finder first (*Go › Connect to Server…*) so it shows under */Volumes*. A folder on one computer's own disk (*C:\\Astro*, */Users/you/Astro*) can't be reached from the others, so each of those computers keeps its own choice for that setting.");
+tip("A change made on two computers at the same time: the later one wins, setting by setting - a rig added on one computer and the location changed on the other both survive. If the NAS can't be reached, SubZeroAstro carries on with the settings it has and catches up when the NAS is back.");
+p("**Stop Using the Profile** - this computer keeps the settings it has at that moment and no longer follows the profile. The profile file stays on the NAS for your other computers. With a profile in use, *File › Clear Everything*'s settings reset is followed by the profile's settings coming back at the next sync.");
+sub("Export / Import My Settings");
+p("**Export My Settings…** saves your settings to one file - the shared ones plus this computer's tool locations, the automatic jobs' folders and schedule, and its crash-recovery folder. Use it to keep a backup, or to set up a new computer: there, **Import My Settings…** and pick the file. Tool locations are only taken if the program is at the same place on the new computer (otherwise set them in *Settings › Your Tools*), NAS folders are translated between Windows and Mac as above, and an automatic job is never switched on by an import - turn it on on the one computer that should run it.");
 
 ch(5, "Finding your way around");
 sec("5.1", "The banner and page buttons", ["Banner", "Continue button", "Back button", "Page navigation"]);
@@ -428,6 +454,7 @@ bullets([
   "**Your rig**: focal length, pixel size and sensor size give the *In your frame* column - how much of your picture each target fills, or whether it needs a mosaic. Pick one of **My Rigs** from the drop-down at the top: it fills in the rig's focal length, and the camera's pixel size and sensor when SubZeroAstro knows the camera (ZWO, QHY and Player One models). Whatever you type for a rig is remembered, so next time picking it is all it takes.",
   "**The target's picture**: click a target and its picture appears beside the altitude chart - a colour photo of that part of the sky from the DSS2 survey (from the CDS service in Strasbourg; only the target's position is sent), with **your frame drawn on it as a yellow box**. You see at a glance whether the target fills your frame or sits small in the middle. Pictures are kept on your computer, so a target you have looked at before shows at once, also without internet. They are survey photos from the 1990s - good for size and framing, not as pretty as your own.",
   "**Work It Out** lists every target that is in the dark and above your horizon for at least the hours you ask: its window, how high it climbs and when, how far it is from the Moon, and a **Best** score (more hours, higher up, Moon out of the way - a bright Moon hurts galaxies far more than emission nebulae shot with a narrowband filter - and a good fit in your frame). Tick the types you want, filter by size, **group** by type, size or time of night, or type a name in **Find**. The chart below shows the selected target's altitude through the night with your horizon and the Moon.",
+  "**Too big for your frame?** The *In your frame* column then shows how many panels a mosaic of it needs (20% overlap). **Send Mosaic Panels to N.I.N.A.** puts one target per panel into N.I.N.A. (*Andromeda Galaxy Panel 1*, *Panel 2*…, built from your template like any target) - see 7.7 for shooting and stitching a mosaic.",
   "**Into N.I.N.A.**: select targets and **Send to N.I.N.A.** - they appear straight away in N.I.N.A.'s target list (Advanced Sequencer › Targets › *SubZeroAstro*), ready to drag into your sequence. Pick **N.I.N.A. Template…** once - one of your own saved targets - and every target you send gets its exposures, autofocus, dithering and checks, with only the name and coordinates changed. (Running N.I.N.A. on another computer? Copy the files from *Documents/N.I.N.A/Targets/SubZeroAstro* to the same folder there.) **Save List for N.I.N.A.…** writes a target list for the simple Sequencer's **Import Targets** (the CSV layout Telescopius exports), and **Copy Coordinates** puts RA/Dec (J2000) on the clipboard for the Framing Assistant. **About This Target** shows the Wikipedia and SIMBAD notes; **Telescopius** copies the name and opens Telescopius.",
   "The objects are N.I.N.A.'s deep-sky database - read from N.I.N.A. itself when it is installed on this computer, otherwise SubZeroAstro's built-in copy of its 4 000+ imaging-worthy objects. Times are in your computer's time zone; positions are good to a fraction of a degree - plenty for planning.",
 ]);
@@ -478,6 +505,27 @@ bullets(["**Bias** - one master per gain and offset.",
 p("The telescope (rig) name is taken from the folder name (*RedCat51Calis* → *RedCat51*) or the headers - check it, because flats are only used for lights from the same rig. Untick any set you don't want, then click **Build Masters**. Each master is saved to your calibration library (*<library>/<rig>/Masters/<camera>/…*) with its settings in the name, and is used automatically whenever you stack lights with matching settings.");
 p("Every master is checked as it is built. You are warned when a dark or bias is **uneven like a picture** (light leaked in), a dark is **far brighter than the bias** (light, or the camera not cooled), a bias is **practically zero** (saved on a 0..1 scale or with a pedestal taken off), or flats are **over-exposed** (clipped) or **very dim**. A warned master is still saved, so you can compare - but better to retake that set.");
 tip("Darks: cap the telescope (or take the camera off) and cover it, at night or in a dark room, with the filter wheel on a filter - not an empty slot. Match the lights' exposure, gain, offset and temperature.", "Taking good darks");
+
+sec("7.7", "Mosaics: several panels, one picture", ["Mosaic", "Stitch a Mosaic", "Panels", "Overlap", "ASIAIR mosaic", "N.I.N.A. mosaic", "Framing Assistant panels"]);
+p("Some targets are bigger than your camera's view - the Andromeda Galaxy or the Veil Nebula with a longer telescope, for example (the Target Picker says *Needs a mosaic*). Then you photograph the target in pieces, called **panels**, like tiles, and join them afterwards. Neighbouring panels **overlap** a little, so they share stars to line them up by.");
+sub("Your first mosaic, step by step");
+steps([
+  "**Plan it.** Decide how many panels (start with two side by side) and let them overlap by **15-20%**. The easiest way: in **Tonight's Target Picker** (6.5), with your rig filled in, the *In your frame* column says how many panels a big target needs (*mosaic (1.4× the frame) - 2 × 1 panels, 20% overlap*); select it and click **Send Mosaic Panels to N.I.N.A.** - one N.I.N.A. target per panel, from your template, numbered from the top left with north up. Or in **N.I.N.A.**, open the *Framing Assistant*, set *Horizontal / Vertical panels* and *Overlap*, and add the panels to your sequence - each panel becomes its own target (*M31 Panel 1*, *M31 Panel 2*…). On an **ASIAIR**, the mosaic option when you frame a target adds each panel to your Plan as its own target.",
+  "**Shoot it.** Give every panel the same filters and roughly the same total exposure, so they match in depth. All panels in one night, or one panel per night - both work. Take flats as usual: each panel is calibrated like any other target.",
+  "**Stack it.** On page 2 each panel is its own group (*M31 Panel 1 · Ha …*). Stack them all in one run. If your sequencer saved every panel under the same target name, SubZeroAstro still keeps them apart by where the telescope was pointing, and names them *M31-Panel1*, *M31-Panel2*… (top left first).",
+  "**Stitch it.** When the masters are panels of a mosaic, SubZeroAstro offers **Stitch the Mosaic…** as soon as the stacking ends - or choose **Stack › Stitch a Mosaic…** on page 1 at any time. Add the panel masters (**Add Panel Masters…** or **Add a Folder…** - all filters at once) and click **Stitch the Mosaic**.",
+  "**Carry on.** **Open in Astro Image Processing ▶** takes the joined masters to page 3: crop, gradient removal and the XTerminators work on the whole mosaic, then Finishing Touches as usual.",
+]);
+sub("What the stitcher does");
+bullets([
+  "**Where each panel sits.** Panels that are plate solved (their header knows exactly where they point) are placed by that. Panels that aren't are plate solved with **ASTAP** first. Without ASTAP, a panel is placed by the stars it shares with a panel already placed - which needs a good overlap.",
+  "**Stars that line up.** The stars in every overlap then fine-tune the placing, so the joins show no doubled stars. The log says how well they agree (a few tenths of a pixel is normal).",
+  "**Brightness evened out.** The sky glow differs from panel to panel and night to night, and a thin cloud dims a panel. From the stars both panels show and the sky in the overlap, each panel gets a brightness factor and a gentle sky correction so that it matches its neighbours - the deepest panel keeps its own levels. The log shows the brightness difference in the overlaps before and after.",
+  "**Soft joins.** Each panel fades out over its last few percent, so where two panels overlap you get a smooth blend, and the overlap areas are a little less noisy than the rest.",
+  "**One master per filter**, all on the same canvas, plate solved, in a new *<target>_Mosaic* folder next to the panels' folders - for example *M31_Ha_Mosaic4_Master.fits*. The outline of a mosaic is never quite a rectangle; the largest rectangle that is covered everywhere is stored as its **auto-crop**, which page 3 offers.",
+]);
+tip("Overlap generously (20%), and keep the camera angle the same for every panel - N.I.N.A.'s Framing Assistant and the ASIAIR do both. A mosaic is big: four panels from a 26-megapixel camera make a picture of roughly 90 megapixels, which needs several GB of memory to stitch.", "For a smooth mosaic");
+warn("Gradients: the stitcher only matches the panels to each other. A panel with a strong light-pollution gradient passes it on to the mosaic - remove gradients on page 3 afterwards, on the whole mosaic at once.");
 
 ch(8, "Page 3 – Astro Image Processing");
 img("12_prepare_done.png", "Page 3 after processing: masters (left), preview with crop box, step history, and the step settings (right)");
@@ -797,6 +845,8 @@ table(["What", "Windows", "Mac"], [
   ["Saved progress", "`%LOCALAPPDATA%\\SubZeroAstro\\checkpoints`", "`~/Library/Application Support/SubZeroAstro`"],
   ["Measurement cache", "`%LOCALAPPDATA%\\FITSBlasterWin\\cache`", "`~/Library/Caches/SubZeroAstro`"],
   ["Settings", "Windows registry (SubZeroAstro settings)", "`~/Library/Preferences`"],
+  ["Settings from before you joined a profile (4.6)", "`%LOCALAPPDATA%\\SubZeroAstro\\Settings backups`", "`~/Library/Application Support/SubZeroAstro/Settings backups`"],
+  ["Your profile (4.6)", "*SubZeroAstro Profile.json* in the NAS folder you chose", "the same file"],
 ], [2200, 3600, 3560]);
 
 sec("13.3", "Organize My Astro Files", ["Organize My Astro Files", "Organize", "Library layout", "Darks library", "NAS", "Undo Last Run", "Duplicates", "One computer only", "Automatic jobs"]);
@@ -1073,6 +1123,7 @@ const HIGHLIGHTS = [
     ["Automatic calibration matching", "Bias, darks and flats picked by camera, gain, offset, temperature, exposure, filter, rig and nearest date, with ✓ ⚠ ✗ and a plain reason", "0.4.0"],
     ["SkyFlats (Mote Buster)", "No flats? A flat is built from your own light frames; a poor one stops and asks before it is used", "0.9.22"],
     ["Build Calibration Masters", "One folder of mixed bias, dark, flat and dark-flat subs is sorted, checked and turned into masters, no lights needed", "0.9.24"],
+    ["Mosaics", "Stitch a Mosaic joins the stacked panels of a target too big for one frame: placed by plate solving or shared stars, brightness evened out, soft joins, one master per filter; panels saved under one name are kept apart when stacking; the Target Picker plans the panels and sends them to N.I.N.A.", "0.9.289"],
     ["Field-distortion correction", "Meridian flips and other setups get a distortion model per frame, so corner stars stay sharp", "0.9.43"],
     ["Hot pixels removed", "Cosmetic correction in every frame: hot pixels and cosmic-ray hits are replaced by their neighbours, so undithered data has no coloured specks", "0.9.54"],
     ["Hot-pixel-proof star matching", "Single-pixel spikes are ignored, so frames with hundreds of hot pixels line up on the sky, not the sensor", "0.9.51"],

@@ -1214,6 +1214,8 @@ class StackWindow(QMainWindow):
                      "gradients and run the XTerminators.")
         self.last_results = w.results
         self.last_saved_cal = w.saved_cal
+        if ok:
+            self.offer_mosaic()
         built_paths = set()
         for g in self.groups:              # release calibration data
             for c in g.plan.all_items():
@@ -1234,6 +1236,51 @@ class StackWindow(QMainWindow):
                 files += [f for f in r.files if Path(f).suffix.lower() in (".fits", ".xisf")
                           and not Path(f).stem.endswith(("_Comet", "_Stars"))]   # comet extras stay in the folder
         return files
+
+    def mosaic_panel_files(self) -> dict:
+        """Masters just made that are panels of a mosaic: {mosaic name: [files]} (two panels or more)."""
+        import mosaic as MZ
+        by = {}
+        for r in getattr(self, "last_results", []) or []:
+            if r.error:
+                continue
+            t = r.group.target
+            base = MZ.panel_base(t)
+            if base == t:
+                continue
+            fs = [f for f in r.files if Path(f).suffix.lower() in (".fits", ".xisf")
+                  and not Path(f).stem.endswith(("_Comet", "_Stars"))]
+            by.setdefault(base, {}).setdefault(t, []).extend(fs)
+        return {b: [f for fs in d.values() for f in fs] for b, d in by.items() if len(d) >= 2}
+
+    def offer_mosaic(self):
+        found = self.mosaic_panel_files()
+        if not found:
+            return None
+        names = ", ".join(found)
+        self.log(f"\nThese masters are the panels of a mosaic ({names}). Next: Stack › Stitch a Mosaic… joins them "
+                 "into one picture before Image Processing.")
+        if getattr(self, "quiet", False):
+            return None
+        box = QMessageBox(QMessageBox.Information, "Mosaic panels",
+                          f"<b>These masters are the panels of a mosaic</b> ({names}).<br><br>Stitch them into one "
+                          "picture now? Image Processing then works on the whole mosaic.", QMessageBox.NoButton, self)
+        go = box.addButton("Stitch the Mosaic…", QMessageBox.AcceptRole)
+        box.addButton("Not Now", QMessageBox.RejectRole)
+        files = [f for fs in found.values() for f in fs]
+        go.clicked.connect(lambda: self.open_mosaic(files))
+        box.setWindowModality(Qt.NonModal)
+        self._mosaic_box = box
+        QTimer.singleShot(400, box.open)
+        return box
+
+    def open_mosaic(self, files=None):
+        import mosaic_window
+        d = mosaic_window.MosaicDialog(self, self.settings, files or [])
+        d.setModal(False)
+        d.show()
+        self._mosaic_dlg = d
+        return d
 
     def stop_here_pixinsight(self):
         files = self.master_files()

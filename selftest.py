@@ -1861,6 +1861,84 @@ def run(app, out_dir: Path) -> int:
         __import__("subzeroastro").reset_settings(_qs)
         check(sorted(_qs.allKeys()) == ["finish/signature", "prep/rcastro", "stack/masters_root", "stack/rigs"],
               "reset all settings to factory defaults keeps folders, tool locations, rigs and signature")
+        # My Profile: the same settings on every computer, through a profile file on the NAS
+        import json as _pjs
+        import profile_sync as _ps
+        import profile_window as _pw
+        _pd = Path(_tf.mkdtemp())
+        (_pd / "nas").mkdir()
+        _pwin = _ps.Places("win", drives={"Z": ("astronas", "Astro")})
+        _pmac = _ps.Places("posix", mounts=_ps.parse_mount_output(
+            "//brian@astronas._smb._tcp.local/Astro on /Volumes/Astro (smbfs, nodev, nosuid, mounted by brian)\n"
+            "/dev/disk3s1s1 on / (apfs, sealed, local, read-only)"))
+        check(_pwin.to_neutral(r"\\astronas\Astro\Library") == "smb://astronas/Astro/Library"
+              and _pwin.to_neutral(r"Z:\Incoming\M31") == "smb://astronas/Astro/Incoming/M31"
+              and _pmac.from_neutral("smb://astronas/Astro/Library") == "/Volumes/Astro/Library"
+              and _pwin.from_neutral(_pmac.to_neutral("/Volumes/Astro/Lib/M31")) == r"Z:\Lib\M31"
+              and _pmac.from_neutral(r"C:\Astro") is None and _pwin.from_neutral("/Users/brian/Astro") is None
+              and _pwin.to_neutral(r"C:\Astro") == r"C:\Astro",
+              "My Profile: NAS folders translate between Windows (\\\\astronas\\Astro, Z:\\) and Mac (/Volumes/Astro); "
+              "a computer's own disk stays its own")
+        check(_ps.is_shared("organize/riglist") and _ps.is_shared("stack/rigs") and _ps.is_shared("picker/lat")
+              and _ps.is_shared("asiair/list") and _ps.is_shared("nina_clean/list") and _ps.is_shared("prep/xt_bxt")
+              and not any(_ps.is_shared(k) for k in ("prep/astap", "prep/graxpert", "prep/rcastro", "finish/pi_dir",
+                                                       "geometry", "auto_org/on", "auto_org/dst", "asiair/night",
+                                                       "asiair/with_auto", "nina_clean/with_auto", "profile/folder",
+                                                       "checkpoints/dir", "ui/splash")),
+              "My Profile shares rigs, location, Organize, ASIAIR and N.I.N.A. lists and processing choices; tool "
+              "locations, windows and the automatic jobs stay on each computer")
+        _pa = _QS(str(_pd / "a.ini"), _QS.IniFormat)
+        _pb = _QS(str(_pd / "b.ini"), _QS.IniFormat)
+        _pa.setValue("organize/dst", r"Z:\Library")
+        _pa.setValue("picker/lat", 35.1)
+        _pa.setValue("organize/riglist", _pjs.dumps([{"name": "SQA55"}]))
+        _pa.setValue("prep/astap", r"C:\Program Files\astap\astap.exe")
+        _pa.setValue("auto_org/on", True)
+        _pa.setValue("nina_clean/list", _pjs.dumps([{"folder": r"\\eagle\Users\me\Pictures", "days": 7}]))
+        _pra = _ps.start_using(_pa, str(_pd / "nas"), _pwin, backup=False)
+        _pb.setValue("picker/lat", 1.0)
+        _pb.setValue("prep/astap", "/Applications/ASTAP.app")
+        _prb = _ps.start_using(_pb, str(_pd / "nas"), _pmac, backup=False)
+        check(_pra.get("new") and not _prb.get("new") and (_pd / "nas" / _ps.PROFILE_FILE).is_file()
+              and _pb.value("organize/dst") == "/Volumes/Astro/Library" and float(_pb.value("picker/lat")) == 35.1
+              and "SQA55" in (_pb.value("organize/riglist") or "") and _pb.value("prep/astap") == "/Applications/ASTAP.app"
+              and _pb.value("auto_org/on") is None
+              and "smb://eagle/Users/me/Pictures" in _pjs.dumps(_ps.read_file(_pd / "nas" / _ps.PROFILE_FILE)),
+              f"My Profile: a second computer (a Mac) joining the profile gets the rigs, location and library "
+              f"(as /Volumes/Astro) and keeps its own tool locations ({_pb.value('organize/dst')})")
+        _pb.setValue("picker/lat", 40.0)                 # changed on the Mac ...
+        _pa.setValue("stack/kappa", 2.5)                 # ... and something else on Windows at the same time
+        _ps.sync(_pb, _pmac)
+        _ps.sync(_pa, _pwin)
+        _ps.sync(_pb, _pmac)
+        check(float(_pa.value("picker/lat")) == 40.0 and float(_pb.value("stack/kappa")) == 2.5
+              and _pa.value("prep/astap") == r"C:\Program Files\astap\astap.exe",
+              "My Profile: changes made on two computers at once both reach the other one")
+        _pa.remove("stack/kappa")
+        _ps.sync(_pa, _pwin)
+        _ps.sync(_pb, _pmac)
+        check(_pb.value("stack/kappa") is None, "My Profile: a setting cleared on one computer is cleared on the others")
+        _pexp = _ps.export_settings(_pa, _pd / "export.json", _pwin)
+        _pc = _QS(str(_pd / "c.ini"), _QS.IniFormat)
+        _pimp = _ps.import_settings(_pc, _pexp, _pmac)
+        check(_pimp.get("ok") and _pc.value("organize/dst") == "/Volumes/Astro/Library"
+              and "SQA55" in (_pc.value("organize/riglist") or "") and _pc.value("auto_org/on") is None
+              and "prep/astap" in _pimp.get("skipped", []) and _pc.value("prep/astap") is None,
+              "Export / Import My Settings moves the settings to another computer; an automatic job is never "
+              "switched on, and a tool location that doesn't exist there is left out")
+        _pdlg = _pw.ProfileDialog(w, _pa, None, "test")
+        _pdlg.show()
+        QApplication.processEvents()
+        _pdok = "uses the profile" in _pdlg.status.text() and _pdlg.btn_stop.isEnabled()
+        _pdlg.stop(ask=False)
+        _pdok = _pdok and "No profile in use" in _pdlg.status.text() and not _ps.folder(_pa) \
+            and _pa.value("organize/dst") == r"Z:\Library"
+        shot("0_my_profile.png", _pdlg)
+        _pdlg.close()
+        check(_pdok and w.act_profile in w.menuBar().actions()[4].menu().actions()
+              and hasattr(w, "profile_syncer"),
+              "Settings › My Profile… shows the profile in use, and Stop Using the Profile keeps this computer's "
+              "settings")
         # the intro animation: frames at set moments, and it closes by itself
         import splash as _sp
         sp = _sp.Splash("SubZeroAstro", "Brian A. Poteet, DVM", "From subs to masters - zero hassle.", "0.0 test")
@@ -5552,6 +5630,104 @@ def run(app, out_dir: Path) -> int:
               and _fio.set_to == {0: "L-Quad Enhance", 1: "L-Pro"} and _fid_w == 2 and _fid_hdr == "L-Quad Enhance",
               f"Frame › Identify Filter…: the window lists each frame ({_fid_rows}), Use as Filter Name sets "
               f"{_fid_n}, Write FILTER Into the Files writes {_fid_w} (FILTER now {_fid_hdr!r})")
+        # Stack › Stitch a Mosaic…: four overlapping panels of one nebula (each a little turned, brighter or
+        # darker and with its own sky glow) are placed, fine-tuned on their shared stars, evened out and blended
+        import mosaic as _mz
+        import mosaic_window as _mzw
+        import prepare as _mz_P
+        _mz_dir = _au_root / "mosaic"
+        __import__("shutil").rmtree(_mz_dir, ignore_errors=True)
+        _mz_dir.mkdir(parents=True, exist_ok=True)
+
+        def _mz_make(folder, solved=True, filt="Ha", W=900, H=640, ov=0.2, seed=1):
+            import math as _m
+            folder.mkdir(parents=True, exist_ok=True)
+            _r = np.random.default_rng(seed)
+            _sc = 2.0 / 3600
+            _ra0, _de0 = 83.8, 22.0
+            _span = 2 * W * _sc * 1.2
+            _sra = _ra0 + (_r.random(2500) - .5) * _span / _m.cos(_m.radians(_de0))
+            _sde = _de0 + (_r.random(2500) - .5) * _span
+            _fl = 20000 * _r.random(2500) ** 4 + 200
+            _out, _k = [], 0
+            _yy, _xx = np.mgrid[0:H, 0:W]
+            for _row in range(2):
+                for _col in range(2):
+                    _k += 1
+                    _pra = _ra0 - (_col - .5) * W * (1 - ov) * _sc / _m.cos(_m.radians(_de0))
+                    _pde = _de0 - (_row - .5) * H * (1 - ov) * _sc
+                    _th = _m.radians(0.4 + 0.1 * _k)
+                    _cd = np.array([[-_sc * _m.cos(_th), _sc * _m.sin(_th)], [_sc * _m.sin(_th), _sc * _m.cos(_th)]])
+                    _w = {"crval": np.radians([_pra, _pde]), "crpix": np.array([W / 2 + .5, H / 2 + .5]), "cd": _cd}
+                    _x, _y = _st.__dict__["_wcs_pix"](_w, np.radians(_sra), np.radians(_sde))
+                    _gra, _gde = _st.__dict__["_wcs_sky"](_w, _xx.ravel().astype(float), _yy.ravel().astype(float))
+                    _sep = np.degrees(np.hypot((_gra - _m.radians(_ra0)) * _m.cos(_m.radians(_de0)),
+                                               _gde - _m.radians(_de0)))
+                    _img = (3000 * np.exp(-(_sep / (_span / 6)) ** 2)).reshape(H, W).astype(np.float32)
+                    for _xi, _yi, _f in zip(_x, _y, _fl):
+                        if -5 < _xi < W + 5 and -5 < _yi < H + 5:
+                            _sl = (slice(max(0, int(_yi) - 5), min(H, int(_yi) + 6)),
+                                   slice(max(0, int(_xi) - 5), min(W, int(_xi) + 6)))
+                            _img[_sl] += (_f * np.exp(-((_xx[_sl] - _xi) ** 2 + (_yy[_sl] - _yi) ** 2) / 3.4)
+                                          ).astype(np.float32)
+                    _img = _img * (1.0 + 0.08 * (_k - 2)) + 1000 + 150 * _k + 0.2 * (_yy - H / 2) \
+                        + _r.normal(0, 8, _img.shape)
+                    _hd = [("IMAGETYP", "Master Light", ""), ("OBJECT", f"TestNeb Panel {_k}", ""), ("FILTER", filt, ""),
+                           ("EXPTOTAL", 3600.0 + _k, ""), ("RA", _pra, ""), ("DEC", _pde, "")]
+                    if solved:
+                        _hd += [("CTYPE1", "RA---TAN", ""), ("CTYPE2", "DEC--TAN", ""), ("CRVAL1", _pra, ""),
+                                ("CRVAL2", _pde, ""), ("CRPIX1", W / 2 + .5, ""), ("CRPIX2", H / 2 + .5, ""),
+                                ("CD1_1", _cd[0, 0], ""), ("CD1_2", _cd[0, 1], ""), ("CD2_1", _cd[1, 0], ""),
+                                ("CD2_2", _cd[1, 1], "")]
+                    _out += _st.save_master_file(folder / f"TestNeb_Panel{_k}_{filt}_Master", _img, _hd)
+            return _out
+        check(_mz.panel_base("M31 Panel 2") == "M31" and _mz.panel_base("M31-Panel2") == "M31"
+              and _mz.panel_base("M31_2") == "M31" and _mz.panel_base("NGC 7000") == "NGC 7000"
+              and _mz.panel_base("Sh2-129") == "Sh2-129" and _mz.mosaic_name(["M31 Panel 1", "M31 Panel 2"]) == "M31",
+              "Stitch a Mosaic: panel names are understood (M31 Panel 2, M31-Panel2, M31_2 -> M31; NGC 7000 and "
+              "Sh2-129 are not panels)")
+        _mz_files = _mz_make(_mz_dir / "panels", seed=1) + _mz_make(_mz_dir / "panels", filt="OIII", seed=1)
+        _mz_res = _mz.stitch(_mz_files, out_dir=_mz_dir / "out")
+        _mz_q = _mz_res.quality.get("Ha", (0, 1e9))
+        _mz_ms = [_mz_P.load_master(f_) for f_ in _mz_res.files]
+        _mz_sets = _mz_P.target_sets(_mz_ms)
+        check(len(_mz_res.files) == 2 and _mz_res.panels == 4 and 1550 < _mz_res.shape[1] < 1720
+              and 1100 < _mz_res.shape[0] < 1240 and all(m_.solved and m_.autocrop for m_ in _mz_ms)
+              and len(_mz_sets) == 1 and not _mz_P.needs_line_up(_mz_sets[0]) and _mz_ms[0].target == "TestNeb",
+              f"Stitch a Mosaic: 4 plate-solved panels in 2 filters make one plate-solved master per filter on one "
+              f"canvas ({_mz_res.shape[1]} x {_mz_res.shape[0]}, {_mz_res.panels} panels, {_mz_res.filters}), which "
+              f"Image Processing takes as one target, already lined up")
+        check(_mz_res.star_pairs > 50 and _mz_res.star_rms < 0.8 and _mz_q[1] < 0.05 * _mz_q[0],
+              f"Stitch a Mosaic: the stars in the overlaps agree ({_mz_res.star_pairs} stars, {_mz_res.star_rms:.2f} px) "
+              f"and the brightness difference in the overlaps drops from {_mz_q[0]:.0f} to {_mz_q[1]:.0f} ADU")
+        _mz_res2 = _mz.stitch(_mz_make(_mz_dir / "nosolve", solved=False, seed=2), out_dir=_mz_dir / "out2")
+        check(len(_mz_res2.files) == 1 and _mz_res2.panels == 4 and _mz_res2.star_rms < 0.8
+              and all("stars" in h_ or h_ == "reference" for h_ in _mz_res2.placed.values()),
+              f"Stitch a Mosaic without plate solutions or ASTAP: the panels are placed by the stars they share "
+              f"({_mz_res2.star_pairs} stars agree to {_mz_res2.star_rms:.2f} px)")
+        # frames of one target name but four pointings are stacked as four panels; a comet is never split
+        _mz_inf = lambda ra_, i_, t_="M31": _st.LightFrame(_st.ImgInfo(
+            Path(f"mz{i_}.fits"), "light", False, "cam", None, None, 60, None, "Ha", 6248, 4176, None, None, 1, None,
+            None, f"2026-01-01T00:{i_:02d}:00", 400, None, None, t_, None, ra=ra_, dec=41.27, scale=1.94))
+        _mz_g = _st.group_lights([_mz_inf(10.68 + 0.0005 * i_, i_) for i_ in range(4)]
+                                 + [_mz_inf(9.1, 10 + i_) for i_ in range(4)], _st.Rigs())
+        _mz_c = _st.mosaic_panels([_mz_inf(1.0, i_, "C/2023 A3") for i_ in range(3)]
+                                  + [_mz_inf(3.0, 5 + i_, "C/2023 A3") for i_ in range(3)])
+        check([g_.target for g_ in _mz_g] == ["M31-Panel1", "M31-Panel2"] and len(_mz_c) == 1,
+              f"Stacking: frames saved under one target name but pointed at two places are stacked as two mosaic "
+              f"panels ({[g_.target for g_ in _mz_g]}), dithering stays one; a comet is never split")
+        # the window: add the panel masters, stitch in the background, then on to Image Processing
+        _mzd = _mzw.MosaicDialog(None, None, [_mz_dir / "nosolve"])
+        _mzd.astap = None
+        _mzd.out_edit.setText(str(_mz_dir / "out3"))
+        _mz_rows = _mzd.table.rowCount()
+        _mzd.run(wait=True)
+        _mz_ok = _mzd.result is not None and _mzd.b_next.isEnabled() and "Done" in _mzd.status.text()
+        shot("mosaic_window.png", _mzd)
+        _mzd.close()
+        check(_mz_rows == 4 and _mz_ok,
+              f"Stack › Stitch a Mosaic…: the window lists the 4 panel masters and stitches them "
+              f"({_mzd.status.text()[:160]})")
         # the real forecast services, from this build (information only - the internet isn't the app's fault)
         import weather as _wxl
         try:
@@ -5733,6 +5909,24 @@ def run(app, out_dir: Path) -> int:
               f"Send to N.I.N.A. writes targets into N.I.N.A.'s target list ({_pw1[0].name if _pw1 else '-'}), and "
               f"with one of your own as the template keeps its steps and moves every coordinate to the new target "
               f"({_pw2[0].name if _pw2 else '-'})")
+        import target_picker as _tp_mz
+        # a target bigger than the frame: its mosaic panels, one N.I.N.A. target each (600 mm: M 31 needs two)
+        _pwin.focal.setValue(600)
+        _pmz_plan = _tp_mz.mosaic_plan(_pm.target, _pwin.fov())
+        _pmz = _pwin.send_mosaic_to_nina(folder=_pnf, ask=False) or []
+        _pmz_docs = [_pj.loads(f_.read_text(encoding="utf-8")) for f_ in _pmz]
+        _pmz_ra = [d_["Target"]["InputCoordinates"]["RAHours"] * 60 + d_["Target"]["InputCoordinates"]["RAMinutes"]
+                   for d_ in _pmz_docs]
+        _pwin.focal.setValue(360)
+        _pmz_none = _tp_mz.mosaic_plan(_pm.target, _pwin.fov())
+        check(_pmz_plan and _pmz_plan["cols"] == 2 and _pmz_plan["rows"] == 1 and len(_pmz) == 2
+              and [d_["Target"]["TargetName"] for d_ in _pmz_docs] == ["Andromeda Galaxy Panel 1",
+                                                                     "Andromeda Galaxy Panel 2"]
+              and _pmz_ra[0] > _pmz_ra[1] and _pmz_docs[0]["Items"]["$values"][-1].get("ExposureTime") == 300.0
+              and _pmz_none is None,
+              f"Target Picker › Send Mosaic Panels to N.I.N.A.: a target bigger than the frame gets "
+              f"{_tp_mz.mosaic_text(_pmz_plan)}, one N.I.N.A. target per panel from the template, east on the left "
+              f"({[f_.name for f_ in _pmz]}); at 360 mm it fits in one frame")
         _pwin.find.setText("")
         # My Rigs in the picker: a rig fills in its focal length and its camera's sensor; what you type is kept
         _prl0 = _pwin.settings.value("organize/riglist", "[]")
