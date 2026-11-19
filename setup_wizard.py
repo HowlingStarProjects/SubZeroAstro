@@ -213,7 +213,7 @@ class SetupWizard(QDialog):
         v.addSpacing(10)
         v.addWidget(_para("<span style='color:#8a93a6'>Installing SubZeroAstro itself is in the first chapter of "
                           "the manual (Help › User Manual). This setup can be run again any time from "
-                          "Settings › Set Up SubZeroAstro….</span>"))
+                          "Settings › Set Up SubZeroAstro…</span>"))
 
     def _page_folders(self, v):
         v.addWidget(_title("Your folders", "Where your pictures arrive, are kept and end up."))
