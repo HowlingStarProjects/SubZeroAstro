@@ -267,7 +267,7 @@ class SetupWizard(QDialog):
         v.addWidget(_para(
             "These add sharpening, noise and star removal, gradient removal and plate solving on the "
             "<b>Astro Image Processing</b> page. Install the ones you want with <b>Download</b>, then click "
-            "<b>Check Again</b>. If one is installed somewhere unusual, use <b>Find It…</b>."))
+            "<b>Check Again</b>. If one is installed somewhere unusual, use <b>Find It…</b>"))
         grid = QGridLayout()
         grid.setColumnStretch(1, 1)
         self.tool_rows = {}
