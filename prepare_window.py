@@ -17,10 +17,11 @@ import traceback
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QRectF, QThread, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QThread, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
-                               QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGraphicsPixmapItem,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+                               QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGraphicsEllipseItem,
+                               QGraphicsPixmapItem,
                                QGraphicsRectItem, QGraphicsScene, QGraphicsView, QGroupBox, QHBoxLayout,
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
                                QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSpinBox, QSplitter,
@@ -423,6 +424,140 @@ class CropView(QGraphicsView):
 
 
 # --------------------------------------------------------------------------
+# Mark the nebula that gradient removal must keep
+# --------------------------------------------------------------------------
+
+class KeepView(QGraphicsView):
+    """The picture, with ovals drawn round the nebula to keep: drag to draw one, drag an oval to move it,
+    right-click (Control-click on a Mac) to remove it."""
+    changed = Signal()
+
+    def __init__(self, rgb8, full, scale_f, areas, parent=None):
+        super().__init__(parent)
+        self.setScene(QGraphicsScene(self))
+        self.setBackgroundBrush(QColor(10, 10, 12))
+        self.setRenderHint(QPainter.SmoothPixmapTransform)
+        self.setFrameShape(QFrame.NoFrame)
+        h, w, _ = rgb8.shape
+        arr = np.ascontiguousarray(rgb8)
+        pix = QGraphicsPixmapItem(QPixmap.fromImage(QImage(arr.data, w, h, 3 * w, QImage.Format_RGB888).copy()))
+        pix.setScale(scale_f)
+        self.scene().addItem(pix)
+        self.full = full
+        self.scene().setSceneRect(QRectF(0, 0, full[0], full[1]))
+        self.ovals = []
+        self._drag = None
+        for a in areas or []:
+            self.add_oval(QRectF(a[0], a[1], a[2] - a[0], a[3] - a[1]))
+
+    def add_oval(self, r):
+        it = QGraphicsEllipseItem(r.normalized())
+        it.setPen(QPen(QColor(80, 220, 255), 0))
+        it.setBrush(QBrush(QColor(80, 220, 255, 45)))
+        self.scene().addItem(it)
+        self.ovals.append(it)
+        return it
+
+    def areas(self) -> list:
+        out = []
+        for it in self.ovals:
+            r = it.rect().translated(it.pos())
+            out.append([int(round(r.left())), int(round(r.top())), int(round(r.right())), int(round(r.bottom()))])
+        return out
+
+    def clear(self):
+        for it in self.ovals:
+            self.scene().removeItem(it)
+        self.ovals = []
+        self.changed.emit()
+
+    def _hit(self, p):
+        for it in reversed(self.ovals):
+            r = it.rect().translated(it.pos())
+            rx, ry = max(r.width() / 2, 1), max(r.height() / 2, 1)
+            if ((p.x() - r.center().x()) / rx) ** 2 + ((p.y() - r.center().y()) / ry) ** 2 <= 1:
+                return it
+        return None
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
+
+    def mousePressEvent(self, e):
+        p = self.mapToScene(e.position().toPoint())
+        mods = e.modifiers() & (Qt.MetaModifier | Qt.ControlModifier | Qt.AltModifier)
+        hit = self._hit(p)
+        if e.button() == Qt.RightButton or (e.button() == Qt.LeftButton and mods):
+            if hit is not None:
+                self.scene().removeItem(hit)
+                self.ovals.remove(hit)
+                self.changed.emit()
+            return
+        if e.button() != Qt.LeftButton:
+            return
+        if hit is not None:
+            self._drag = ("move", hit, p, QPointF(hit.pos()))
+        else:
+            self._drag = ("new", self.add_oval(QRectF(p, p)), p, None)
+
+    def mouseMoveEvent(self, e):
+        if not self._drag:
+            return
+        kind, it, p0, pos0 = self._drag
+        p = self.mapToScene(e.position().toPoint())
+        if kind == "move":
+            it.setPos(pos0 + (p - p0))
+        else:
+            it.setRect(QRectF(p0, p).normalized())
+
+    def mouseReleaseEvent(self, e):
+        if not self._drag:
+            return
+        kind, it, _p0, _pos = self._drag
+        self._drag = None
+        r = it.rect()
+        if kind == "new" and (r.width() < 12 or r.height() < 12):
+            self.scene().removeItem(it)            # a click, not a drag
+            self.ovals.remove(it)
+        self.changed.emit()
+
+
+class KeepAreasDialog(QDialog):
+    """Mark the faint nebula or galaxy the gradient removal must leave alone (PixInsight's DBE: no samples there)."""
+
+    def __init__(self, parent, rgb8, full, scale_f, areas):
+        super().__init__(parent)
+        self.setWindowTitle("Mark Nebula to Keep")
+        self.resize(980, 720)
+        v = QVBoxLayout(self)
+        tip = QLabel("Drag across faint nebula or galaxy glow that gradient removal must not wipe out - an oval "
+                     "appears. Drag an oval to move it; right-click it (Control-click on a Mac) to remove it.<br>"
+                     "The gradient removal then measures the sky only outside your ovals. Only SubZeroAstro's "
+                     "built-in gradient removal can do this, so it is used for this target instead of GraXpert.")
+        tip.setWordWrap(True)
+        v.addWidget(tip)
+        self.view = KeepView(rgb8, full, scale_f, areas)
+        v.addWidget(self.view, 1)
+        row = QHBoxLayout()
+        b_clear = QPushButton("Remove All")
+        b_clear.clicked.connect(self.view.clear)
+        row.addWidget(b_clear)
+        row.addStretch(1)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        row.addWidget(bb)
+        v.addLayout(row)
+
+    def areas(self) -> list:
+        return self.view.areas()
+
+
+# --------------------------------------------------------------------------
 # Worker
 # --------------------------------------------------------------------------
 
@@ -567,6 +702,7 @@ class PrepareWindow(QMainWindow):
         self.settings = settings
         self.sets = []                       # list of lists of Master (preview copies)
         self.crops = {}                      # set index -> rect
+        self.keep_areas = {}                 # set index -> [[x0, y0, x1, y1]] nebula ovals gradient removal keeps
         self.specs = {}
         self.panels = {}
         self.rc_products = None
@@ -752,6 +888,16 @@ class PrepareWindow(QMainWindow):
                                 "was used.\nSubtraction: light pollution and moon glow.\nDivision: vignetting "
                                 "that flats did not take out.")
         gv.addRow("Method:", self.grad_tool)
+        krow = QHBoxLayout()
+        self.btn_keep = QPushButton("Mark Nebula to Keep…")
+        self.btn_keep.setToolTip("Draw ovals round faint nebula or galaxy glow so gradient removal does not take it "
+                                 "for light pollution and wipe it out (uses the built-in gradient removal)")
+        self.btn_keep.clicked.connect(lambda: self.mark_keep_areas())
+        krow.addWidget(self.btn_keep)
+        self.keep_label = QLabel("")
+        self.keep_label.setWordWrap(True)
+        krow.addWidget(self.keep_label, 1)
+        gv.addRow(krow)
         gv.addRow("GraXpert smoothing:", self.gx_smooth)
         gv.addRow("Correction:", self.gx_corr)
         gw = QWidget()
@@ -1047,9 +1193,33 @@ class PrepareWindow(QMainWindow):
         small = [type(m)(**{**m.__dict__, "data": m.data[:, ::step, ::step]}) for m in s]
         rgb = P.quick_look(small, pals[0]) if pals else np.zeros((10, 10, 3))
         h, w = s[0].shape
-        self.view.set_image((rgb * 255 + 0.5).astype(np.uint8), (w, h), step)
+        self._look = ((rgb * 255 + 0.5).astype(np.uint8), (w, h), step)
+        self.view.set_image(self._look[0], (w, h), step)
         self.view.set_crop(self.crops.get(row, P.common_autocrop(s)))
         self.refresh_history(keep_view=True)
+        self._keep_note()
+
+    # ------------------------------------------------------------ nebula to keep (gradient removal)
+    def _keep_note(self):
+        n = len(self.keep_areas.get(self.set_list.currentRow(), []))
+        self.keep_label.setText(f"{n} area(s) marked - the built-in gradient removal keeps them" if n else "")
+
+    def mark_keep_areas(self, areas=None):
+        """Open the marking window for the target shown (areas: set them directly, for the self-test)."""
+        row = self.set_list.currentRow()
+        if not 0 <= row < len(self.sets) or getattr(self, "_look", None) is None:
+            return
+        if areas is None:
+            dlg = KeepAreasDialog(self, *self._look, self.keep_areas.get(row, []))
+            if dlg.exec() != QDialog.Accepted:
+                return
+            areas = dlg.areas()
+        self.keep_areas[row] = [list(a) for a in areas]
+        if not self.keep_areas[row]:
+            del self.keep_areas[row]
+        self._keep_note()
+        self.log(f"{len(areas)} nebula area(s) marked to keep from gradient removal" if areas else
+                 "No nebula areas marked - gradient removal works on the whole picture")
 
     # ------------------------------------------------------------ step history
     def current_checkpoints(self):
@@ -1210,7 +1380,8 @@ class PrepareWindow(QMainWindow):
             graxpert=self.gx_path, gx_smoothing=self.gx_smooth.value(), gx_correction=self.gx_corr.currentText(),
             rcastro=self.rc_path, xt=xt, device=self.device.currentData() or "auto", formats=fmts,
             quicklook=bool(imgs), image_formats=imgs, checkpoints=self.chk_checkpoints.isChecked(), out_dir=self.out_edit.text().strip() or None,
-            palette=self.palette.currentText() if index == self.set_list.currentRow() else None)
+            palette=self.palette.currentText() if index == self.set_list.currentRow() else None,
+            keep_areas=list(self.keep_areas.get(index, [])) if self.chk_grad.isChecked() else [])
 
     def browse_out_dir(self):
         start = self.out_edit.text().strip() or self.settings.value("stack/masters_root", "") or ""
