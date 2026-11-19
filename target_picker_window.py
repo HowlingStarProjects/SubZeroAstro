@@ -505,6 +505,10 @@ class TargetPickerDialog(QDialog):
                 ("Send to N.I.N.A.", self.send_to_nina, "Puts the selected targets in N.I.N.A.'s target list "
                                                          "(Advanced Sequencer › Targets › SubZeroAstro) - built "
                                                          "from your own saved target as a template, if you pick one"),
+                ("Send Mosaic Panels to N.I.N.A.", self.send_mosaic_to_nina,
+                 "For a target bigger than your frame: one N.I.N.A. target per panel (Panel 1, Panel 2… from the "
+                 "top left, 20% overlap, north up) - shoot each like any target, stack them, then Stack › Stitch a "
+                 "Mosaic…"),
                 ("N.I.N.A. Template…", self.choose_template, "Pick one of your saved N.I.N.A. targets: its "
                                                             "exposures, triggers and checks are copied to every "
                                                             "target you send"),
@@ -867,7 +871,9 @@ class TargetPickerDialog(QDialog):
             t = p.target
             win = f"{_hm(p.start)}–{_hm(p.end)}" if p.start else ""
             vals = [(t.name, t.name), (t.common, t.common), (t.kind, t.kind), (t.size_text, t.size),
-                    (tp.fit_text(p.fill), p.fill if p.fill is not None else -1),
+                    (tp.fit_text(p.fill) + (" - " + tp.mosaic_text(tp.mosaic_plan(t, self.fov()))
+                                            if p.fill is not None and p.fill > 1.05 and tp.mosaic_plan(t, self.fov())
+                                            else ""), p.fill if p.fill is not None else -1),
                     ("" if t.mag is None else f"{t.mag:.1f}", 99 if t.mag is None else t.mag),
                     (f"{p.hours:.1f}", p.hours), (win, p.start.timestamp() if p.start else 0),
                     (f"{p.peak_alt:.0f}° at {_hm(p.peak_time)}", p.peak_alt),
@@ -998,9 +1004,28 @@ class TargetPickerDialog(QDialog):
                              "triggers and checks, with the new target's name and coordinates.")
         return path
 
-    def send_to_nina(self, folder=None, ask=True):
+    def send_mosaic_to_nina(self, folder=None, ask=True):
         ps = self.selected_plans()
         if not ps:
+            QMessageBox.information(self, "Send Mosaic Panels to N.I.N.A.", "Select a target first.")
+            return None
+        t = ps[0].target
+        plan = tp.mosaic_plan(t, self.fov())
+        if not plan or plan.get("too_many"):
+            why = ("Fill in your rig (focal length, pixel size and sensor) first." if not self.fov() else
+                   f"{t.common or t.name} fits in one frame - no mosaic needed." if not plan else
+                   f"{t.common or t.name} would need {plan['cols']} × {plan['rows']} panels with this rig - "
+                   "too many to plan here; a shorter focal length suits it better.")
+            if ask:
+                QMessageBox.information(self, "Send Mosaic Panels to N.I.N.A.", why)
+            self.summary.setText(why)
+            return None
+        return self.send_to_nina(folder, ask, targets=tp.mosaic_targets(t, plan),
+                                 note=f"{t.common or t.name} as a mosaic: {tp.mosaic_text(plan)}. ")
+
+    def send_to_nina(self, folder=None, ask=True, targets=None, note=""):
+        ps = self.selected_plans()
+        if not ps and not targets:
             QMessageBox.information(self, "Send to N.I.N.A.", "Select one or more targets first.")
             return None
         tpl_path = self.settings.value("picker/nina_template", "") or ""
@@ -1025,11 +1050,11 @@ class TargetPickerDialog(QDialog):
         folder = Path(folder) if folder else tp.nina_targets_folder(self._profile())
         label = self.date.date().toString("MMM d")
         try:
-            paths = tp.save_nina_targets([p.target for p in ps], folder, label, template)
+            paths = tp.save_nina_targets(targets or [p.target for p in ps], folder, label, template)
         except OSError as e:
             QMessageBox.warning(self, "Send to N.I.N.A.", f"Couldn't write to {folder}: {e}")
             return None
-        self.summary.setText(f"Sent {len(paths)} target(s) to N.I.N.A. ({folder / 'SubZeroAstro'})"
+        self.summary.setText(note + f"Sent {len(paths)} target(s) to N.I.N.A. ({folder / 'SubZeroAstro'})"
                              + (f", built from {Path(tpl_path).name}" if tpl_path else "")
                              + ". In N.I.N.A.: Sequencer › Advanced › the Targets list on the right › SubZeroAstro - "
                                "drag one into your sequence. (N.I.N.A. on another computer: copy the files into "

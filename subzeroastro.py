@@ -45,7 +45,7 @@ from chart import ChartPoint, SessionChart, filter_color
 
 APP_NAME = "SubZeroAstro"
 APP_TAGLINE = "From subs to masters - zero hassle."
-APP_VERSION = "0.9.288 beta"
+APP_VERSION = "0.9.289 beta"
 ORGANIZER_ENABLED = True       # File › Organize My Astro Files…
 ui_header.APP_VERSION = APP_VERSION       # shown in small print under the name on every page
 APP_AUTHOR = "Brian A. Poteet, DVM"
@@ -1481,6 +1481,11 @@ class MainWindow(QMainWindow):
         a.triggered.connect(self.open_cal_builder)
         m.addAction(a)
         self.act_cal_builder = a
+        a = QAction("Stitch a Mosaic…", self)
+        a.setToolTip("Join the stacked panels of a mosaic into one big picture, one master per filter")
+        a.triggered.connect(lambda: self.open_mosaic())
+        m.addAction(a)
+        self.act_mosaic = a
         a = QAction("Astro Image Processing…", self)
         a.triggered.connect(self.open_prepare)
         m.addAction(a)
@@ -3077,6 +3082,19 @@ class MainWindow(QMainWindow):
         if lib and not (self.settings.value("stack/cal_root", "") or ""):
             self.settings.setValue("stack/cal_root", lib)      # page 2 then finds the new masters
         return dlg
+
+    def open_mosaic(self, files=None, show=True):
+        """Stack › Stitch a Mosaic…"""
+        import mosaic_window
+        if not isinstance(files, (list, tuple)):
+            files = None
+        d = mosaic_window.MosaicDialog(self, self.settings, files)
+        d.setModal(False)
+        if show:
+            d.show()
+            d.raise_()
+        self._mosaic_dlg = d
+        return d
 
     def open_prepare(self):
         import prepare_window
