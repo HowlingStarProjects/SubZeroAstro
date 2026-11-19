@@ -45,7 +45,7 @@ from chart import ChartPoint, SessionChart, filter_color
 
 APP_NAME = "SubZeroAstro"
 APP_TAGLINE = "From subs to masters - zero hassle."
-APP_VERSION = "0.9.294 beta"
+APP_VERSION = "0.9.295 beta"
 ORGANIZER_ENABLED = True       # File › Organize My Astro Files…
 ui_header.APP_VERSION = APP_VERSION       # shown in small print under the name on every page
 APP_AUTHOR = "Brian A. Poteet, DVM"
@@ -3992,7 +3992,18 @@ def main():
         target = Path(sys.argv[1])
         QTimer.singleShot(0, lambda: w.open_folder(target) if target.is_dir()
                           else w.open_sources([("files", [Path(a) for a in sys.argv[1:]])]))
-    sys.exit(app.exec())
+    rc = app.exec()
+    import updater
+    if updater.HANDOVER:
+        # an update is waiting to replace the program files: end now, not after whatever is still running in the
+        # background (a fetch or a file on the NAS that never answers would keep this copy alive with no window)
+        try:
+            w.settings.sync()
+            session_log.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        os._exit(0)
+    sys.exit(rc)
 
 
 if __name__ == "__main__":

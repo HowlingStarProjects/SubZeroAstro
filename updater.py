@@ -202,12 +202,43 @@ def unpack_windows(zip_path: Path, stage: Path) -> Path:
     return hit.parent
 
 
+WAIT_OLD_S = 45                 # seconds the update waits for the old copy to end by itself
+HANDOVER = False                # set once the update helper is running: this copy must now end, whatever is left
+
+
+def _end_soon(seconds=20):
+    """After the hand-over this copy has to go, so the update can replace its files: if something still holds it
+    open (a job waiting on the network, a thread that never returns) it is ended here, its settings saved."""
+    import threading
+
+    def bye():
+        try:
+            from PySide6.QtCore import QSettings
+            QSettings("FITSBlasterWin", "FITSBlasterWin").sync()
+        except Exception:  # noqa: BLE001
+            pass
+        os._exit(0)
+    t = threading.Timer(seconds, bye)
+    t.daemon = True
+    t.start()
+    return t
+
+
 def windows_script(pid: int, new_dir: Path, target: Path, stage: Path) -> str:
     """Wait for this copy to close, copy the new files over it, start it again, tidy up."""
     return (
         "@echo off\r\n"
+        "set n=0\r\n"
         ":wait\r\n"
-        f'tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul && (ping -n 2 127.0.0.1 >nul & goto wait)\r\n'
+        f'tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul || goto go\r\n'
+        # the old copy has closed its windows and saved everything, but something kept it from ending (a copy
+        # from an ASIAIR or the NAS that never came back): after WAIT_OLD_S it is ended, instead of waiting for
+        # ever - which left a SubZeroAstro with no window in Task Manager and the update never installed
+        "set /a n+=1\r\n"
+        f'if %n% GEQ {WAIT_OLD_S} (taskkill /PID {pid} /F >nul 2>&1 & ping -n 3 127.0.0.1 >nul & goto go)\r\n'
+        "ping -n 2 127.0.0.1 >nul\r\n"
+        "goto wait\r\n"
+        ":go\r\n"
         f'robocopy "{new_dir}" "{target}" /E /R:3 /W:1 /NFL /NDL /NJH /NJS /NP >nul\r\n'
         # robocopy 8 and up: a file could not be replaced (in use - e.g. another SubZeroAstro still running):
         # start the copy that is there and say so, instead of leaving you with nothing
@@ -515,6 +546,9 @@ class UpdateBanner(QFrame):
             self._info("Update SubZeroAstro", "The update is ready. Please quit SubZeroAstro (Cmd+Q / close it) "
                                               "and start it again to finish.")
             return
+        global HANDOVER
+        HANDOVER = True
+        _end_soon()
         QApplication.closeAllWindows()
         QApplication.quit()
 

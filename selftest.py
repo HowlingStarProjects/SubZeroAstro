@@ -4489,6 +4489,12 @@ def run(app, out_dir: Path) -> int:
               "updates: another SubZeroAstro still running (e.g. an automatic organize run) is noticed before "
               "updating, and a copy that couldn't be replaced starts the old version with a message instead of "
               "leaving nothing running")
+        _uws_lines = _uws.split("\r\n")
+        check(f"taskkill /PID 4100 /F" in _uws and f"GEQ {_up.WAIT_OLD_S}" in _uws and ":go" in _uws_lines
+              and _uws_lines.index(":go") < next(i for i, x in enumerate(_uws_lines) if x.startswith("robocopy"))
+              and _up.HANDOVER is False and callable(_up._end_soon),
+              f"updates: the update no longer waits for ever on an old copy that can't end (it is ended after "
+              f"{_up.WAIT_OLD_S} s), so the new version installs and opens")
         _an = _up.asset_name()
         _rels = [{"tag_name": "v9.0.200-beta", "draft": True, "assets": [{"name": _an}]},
                  {"tag_name": "v9.0.150-beta", "assets": [{"name": "SomethingElse.zip"}]},
@@ -4568,8 +4574,9 @@ def run(app, out_dir: Path) -> int:
         # Update Now from start to the hand-over: the download thread has ended before SubZeroAstro quits (a
         # thread still running at the quit made macOS report 'SubZeroAstro quit unexpectedly')
         _qs = {}
-        _keep = (_up.prepare_handover, _up.launch, _up.staging_dir, _up.why_not, _up.QApplication)
+        _keep = (_up.prepare_handover, _up.launch, _up.staging_dir, _up.why_not, _up.QApplication, _up._end_soon)
         try:
+            _up._end_soon = lambda seconds=20: None          # (the real one ends the app after the hand-over)
             _ust = _uz / "ustage"
             _ust.mkdir(exist_ok=True)
             _up.staging_dir = lambda: _ust
@@ -4588,7 +4595,8 @@ def run(app, out_dir: Path) -> int:
                 QApplication.processEvents()
                 time.sleep(0.02)
         finally:
-            _up.prepare_handover, _up.launch, _up.staging_dir, _up.why_not, _up.QApplication = _keep
+            _up.prepare_handover, _up.launch, _up.staging_dir, _up.why_not, _up.QApplication, _up._end_soon = _keep
+            _up.HANDOVER = False
         check(_qs.get("finished") is True, f"updates: Update Now waits for the download to end before closing "
                                             f"SubZeroAstro (no 'quit unexpectedly' on the Mac) ({_qs})")
         # Zip My Logs: every open page's log plus a note about this computer, in one zip
