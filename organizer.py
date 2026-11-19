@@ -582,6 +582,10 @@ def what_it_is(p) -> str:
         return "its FITS header starts part way in - the start of the file is damaged (a copy cut short?)"
     if not b.strip(b"\0"):
         return "it starts with nothing but zeros - the header was never written (a copy or capture cut short)"
+    if size % 2880 == 0 or size > 1_000_000:  # sized like a sub, but no FITS inside: the picture never went in
+        return ("the picture was never written into it - it holds leftover data from elsewhere on the disk (a copy "
+                "cut short, or a card or USB stick that failed); it can't be repaired - copy it again from the "
+                "original if you still have it, else delete it")
     txt = sum(1 for x in b[:512] if 32 <= x < 127 or x in (9, 10, 13))
     if txt >= 0.95 * min(len(b), 512):
         return "it holds plain text, not a picture (a text or program file saved under a picture's name)"
