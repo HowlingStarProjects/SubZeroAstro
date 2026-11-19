@@ -1861,6 +1861,84 @@ def run(app, out_dir: Path) -> int:
         __import__("subzeroastro").reset_settings(_qs)
         check(sorted(_qs.allKeys()) == ["finish/signature", "prep/rcastro", "stack/masters_root", "stack/rigs"],
               "reset all settings to factory defaults keeps folders, tool locations, rigs and signature")
+        # My Profile: the same settings on every computer, through a profile file on the NAS
+        import json as _pjs
+        import profile_sync as _ps
+        import profile_window as _pw
+        _pd = Path(_tf.mkdtemp())
+        (_pd / "nas").mkdir()
+        _pwin = _ps.Places("win", drives={"Z": ("astronas", "Astro")})
+        _pmac = _ps.Places("posix", mounts=_ps.parse_mount_output(
+            "//brian@astronas._smb._tcp.local/Astro on /Volumes/Astro (smbfs, nodev, nosuid, mounted by brian)\n"
+            "/dev/disk3s1s1 on / (apfs, sealed, local, read-only)"))
+        check(_pwin.to_neutral(r"\\astronas\Astro\Library") == "smb://astronas/Astro/Library"
+              and _pwin.to_neutral(r"Z:\Incoming\M31") == "smb://astronas/Astro/Incoming/M31"
+              and _pmac.from_neutral("smb://astronas/Astro/Library") == "/Volumes/Astro/Library"
+              and _pwin.from_neutral(_pmac.to_neutral("/Volumes/Astro/Lib/M31")) == r"Z:\Lib\M31"
+              and _pmac.from_neutral(r"C:\Astro") is None and _pwin.from_neutral("/Users/brian/Astro") is None
+              and _pwin.to_neutral(r"C:\Astro") == r"C:\Astro",
+              "My Profile: NAS folders translate between Windows (\\\\astronas\\Astro, Z:\\) and Mac (/Volumes/Astro); "
+              "a computer's own disk stays its own")
+        check(_ps.is_shared("organize/riglist") and _ps.is_shared("stack/rigs") and _ps.is_shared("picker/lat")
+              and _ps.is_shared("asiair/list") and _ps.is_shared("nina_clean/list") and _ps.is_shared("prep/xt_bxt")
+              and not any(_ps.is_shared(k) for k in ("prep/astap", "prep/graxpert", "prep/rcastro", "finish/pi_dir",
+                                                       "geometry", "auto_org/on", "auto_org/dst", "asiair/night",
+                                                       "asiair/with_auto", "nina_clean/with_auto", "profile/folder",
+                                                       "checkpoints/dir", "ui/splash")),
+              "My Profile shares rigs, location, Organize, ASIAIR and N.I.N.A. lists and processing choices; tool "
+              "locations, windows and the automatic jobs stay on each computer")
+        _pa = _QS(str(_pd / "a.ini"), _QS.IniFormat)
+        _pb = _QS(str(_pd / "b.ini"), _QS.IniFormat)
+        _pa.setValue("organize/dst", r"Z:\Library")
+        _pa.setValue("picker/lat", 35.1)
+        _pa.setValue("organize/riglist", _pjs.dumps([{"name": "SQA55"}]))
+        _pa.setValue("prep/astap", r"C:\Program Files\astap\astap.exe")
+        _pa.setValue("auto_org/on", True)
+        _pa.setValue("nina_clean/list", _pjs.dumps([{"folder": r"\\eagle\Users\me\Pictures", "days": 7}]))
+        _pra = _ps.start_using(_pa, str(_pd / "nas"), _pwin, backup=False)
+        _pb.setValue("picker/lat", 1.0)
+        _pb.setValue("prep/astap", "/Applications/ASTAP.app")
+        _prb = _ps.start_using(_pb, str(_pd / "nas"), _pmac, backup=False)
+        check(_pra.get("new") and not _prb.get("new") and (_pd / "nas" / _ps.PROFILE_FILE).is_file()
+              and _pb.value("organize/dst") == "/Volumes/Astro/Library" and float(_pb.value("picker/lat")) == 35.1
+              and "SQA55" in (_pb.value("organize/riglist") or "") and _pb.value("prep/astap") == "/Applications/ASTAP.app"
+              and _pb.value("auto_org/on") is None
+              and "smb://eagle/Users/me/Pictures" in _pjs.dumps(_ps.read_file(_pd / "nas" / _ps.PROFILE_FILE)),
+              f"My Profile: a second computer (a Mac) joining the profile gets the rigs, location and library "
+              f"(as /Volumes/Astro) and keeps its own tool locations ({_pb.value('organize/dst')})")
+        _pb.setValue("picker/lat", 40.0)                 # changed on the Mac ...
+        _pa.setValue("stack/kappa", 2.5)                 # ... and something else on Windows at the same time
+        _ps.sync(_pb, _pmac)
+        _ps.sync(_pa, _pwin)
+        _ps.sync(_pb, _pmac)
+        check(float(_pa.value("picker/lat")) == 40.0 and float(_pb.value("stack/kappa")) == 2.5
+              and _pa.value("prep/astap") == r"C:\Program Files\astap\astap.exe",
+              "My Profile: changes made on two computers at once both reach the other one")
+        _pa.remove("stack/kappa")
+        _ps.sync(_pa, _pwin)
+        _ps.sync(_pb, _pmac)
+        check(_pb.value("stack/kappa") is None, "My Profile: a setting cleared on one computer is cleared on the others")
+        _pexp = _ps.export_settings(_pa, _pd / "export.json", _pwin)
+        _pc = _QS(str(_pd / "c.ini"), _QS.IniFormat)
+        _pimp = _ps.import_settings(_pc, _pexp, _pmac)
+        check(_pimp.get("ok") and _pc.value("organize/dst") == "/Volumes/Astro/Library"
+              and "SQA55" in (_pc.value("organize/riglist") or "") and _pc.value("auto_org/on") is None
+              and "prep/astap" in _pimp.get("skipped", []) and _pc.value("prep/astap") is None,
+              "Export / Import My Settings moves the settings to another computer; an automatic job is never "
+              "switched on, and a tool location that doesn't exist there is left out")
+        _pdlg = _pw.ProfileDialog(w, _pa, None, "test")
+        _pdlg.show()
+        QApplication.processEvents()
+        _pdok = "uses the profile" in _pdlg.status.text() and _pdlg.btn_stop.isEnabled()
+        _pdlg.stop(ask=False)
+        _pdok = _pdok and "No profile in use" in _pdlg.status.text() and not _ps.folder(_pa) \
+            and _pa.value("organize/dst") == r"Z:\Library"
+        shot("0_my_profile.png", _pdlg)
+        _pdlg.close()
+        check(_pdok and w.act_profile in w.menuBar().actions()[4].menu().actions()
+              and hasattr(w, "profile_syncer"),
+              "Settings › My Profile… shows the profile in use, and Stop Using the Profile keeps this computer's "
+              "settings")
         # the intro animation: frames at set moments, and it closes by itself
         import splash as _sp
         sp = _sp.Splash("SubZeroAstro", "Brian A. Poteet, DVM", "From subs to masters - zero hassle.", "0.0 test")

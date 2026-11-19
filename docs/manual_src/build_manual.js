@@ -300,6 +300,7 @@ bullets([
 ]);
 sec("4.4", "Settings worth knowing", ["Settings", "Intro animation", "Saved progress", "Star measurement"]);
 bullets([
+  "**Settings › My Profile…** - the same settings on every computer you use, kept in a profile on your NAS; also Export / Import My Settings (4.6).",
   "**Settings › Star measurement** - *Fast* (default, about 3-4× quicker on a network drive), *Full frame* or *Off*.",
   "**Settings › Your Tools (ASTAP, GraXpert, RC-Astro)…** - see, locate and download the helper programs, and activate RC-Astro licences (4.1).",
   "**Settings › Saved Progress…** - where crash-recovery copies are kept, how much space they use and how long they are kept (30 days by default).",
@@ -316,6 +317,31 @@ bullets([
   "**Same Framing Next Session** (also *Stack › Same Framing Next Session (N.I.N.A.)…*) - pick a plate-solved master (Astro Image Processing solves masters when ASTAP is installed) or any solved picture of the target. SubZeroAstro works out the centre of the picture and the camera's **position angle** exactly the way N.I.N.A. measures them, and **Send to N.I.N.A.** puts a target with both into N.I.N.A.'s target list (*Sequencer › Advanced › Targets › SubZeroAstro*, built from your Target Picker template if you chose one). Next session use it with *Slew, center and rotate* (with a rotator, or N.I.N.A.'s manual rotator telling you how far to turn the camera) or *Slew and center* without one, and the new frames line up with the old ones. A picture that isn't solved yet is solved by ASTAP first, from a copy - your file is not changed. **Copy Centre & Angle** copies them as text.",
   "**Guiding RMS and pier side** - with N.I.N.A.'s Session Metadata plugin, each frame's guiding is shown, charted and used in culling on Quality and Cull (6.2).",
 ]);
+
+sec("4.6", "My Profile: the same settings on every computer", ["My Profile", "Profile", "Several computers", "Settings on every computer", "Sync settings", "Export My Settings", "Import My Settings", "Backup of settings", "New computer", "Windows and Mac together"]);
+p("If you use SubZeroAstro on more than one computer - say a Windows PC in the observatory and a Mac in the house - each one normally keeps its own settings, so a rig added on one is missing on the other, and Organize on the two can point at different folders. **Settings › My Profile…** fixes that: your settings live in one small file on your NAS, and every computer that uses it has the same ones. There is no account or sign-in.");
+sub("Setting it up");
+steps([
+  "On the first computer: **Settings › My Profile… › Use a Profile on My NAS…** and pick a folder on your NAS, e.g. *\\\\astronas\\Astro\\SubZeroAstro* (Windows) or */Volumes/Astro/SubZeroAstro* (Mac). A profile is made there from this computer's settings (the file *SubZeroAstro Profile.json*).",
+  "On each other computer: the same, picking the same folder. SubZeroAstro asks before it replaces that computer's shared settings with the profile's, and keeps a copy of the old ones first (see 13.2).",
+  "That's all. From now on a change made on one computer reaches the others: SubZeroAstro brings itself up to date when it starts, every minute while it is open, when you click back into it and when it closes. A window that is already open shows the new settings the next time it is opened. **Sync Now** does it straight away, and the window shows when the last sync was.",
+]);
+sub("What is shared, and what stays on each computer");
+table(["Shared through the profile", "Kept on each computer"], [
+  ["My Rigs, your location (latitude and longitude)", "Where PixInsight, ASTAP, GraXpert and RC-Astro are installed"],
+  ["Organize choices, the incoming and library folders", "Window sizes and positions"],
+  ["The ASIAIR list and its incoming folder", "The crash-recovery (Saved Progress) folder"],
+  ["The N.I.N.A. computers to clean up and their keep-days", "The automatic jobs: Organize Automatically, the overnight ASIAIR fetch and the automatic N.I.N.A. clean-up - on or off, and when"],
+  ["Target Picker and weather, the calibration and masters folders", "The N.I.N.A. profile files added in Work With N.I.N.A."],
+  ["Processing choices on pages 1 to 4, your signature, AstroBin details", ""],
+], [4680, 4680]);
+p("The automatic jobs stay on one computer on purpose: they move and delete files, and two computers doing the same job on the same library would get in each other's way. Turn them on on the one computer that should run them (13.3).");
+sub("Windows and Mac together");
+p("One profile works for Windows and Mac computers at the same time. A NAS folder has a different name on each - *\\\\astronas\\Astro\\Library* (or *Z:\\Library* with a mapped drive) on Windows, */Volumes/Astro/Library* on a Mac - and SubZeroAstro translates it for each computer. On the Mac, connect to the NAS share in Finder first (*Go › Connect to Server…*) so it shows under */Volumes*. A folder on one computer's own disk (*C:\\Astro*, */Users/you/Astro*) can't be reached from the others, so each of those computers keeps its own choice for that setting.");
+tip("A change made on two computers at the same time: the later one wins, setting by setting - a rig added on one computer and the location changed on the other both survive. If the NAS can't be reached, SubZeroAstro carries on with the settings it has and catches up when the NAS is back.");
+p("**Stop Using the Profile** - this computer keeps the settings it has at that moment and no longer follows the profile. The profile file stays on the NAS for your other computers. With a profile in use, *File › Clear Everything*'s settings reset is followed by the profile's settings coming back at the next sync.");
+sub("Export / Import My Settings");
+p("**Export My Settings…** saves your settings to one file - the shared ones plus this computer's tool locations, the automatic jobs' folders and schedule, and its crash-recovery folder. Use it to keep a backup, or to set up a new computer: there, **Import My Settings…** and pick the file. Tool locations are only taken if the program is at the same place on the new computer (otherwise set them in *Settings › Your Tools*), NAS folders are translated between Windows and Mac as above, and an automatic job is never switched on by an import - turn it on on the one computer that should run it.");
 
 ch(5, "Finding your way around");
 sec("5.1", "The banner and page buttons", ["Banner", "Continue button", "Back button", "Page navigation"]);
@@ -784,6 +810,8 @@ table(["What", "Windows", "Mac"], [
   ["Saved progress", "`%LOCALAPPDATA%\\SubZeroAstro\\checkpoints`", "`~/Library/Application Support/SubZeroAstro`"],
   ["Measurement cache", "`%LOCALAPPDATA%\\FITSBlasterWin\\cache`", "`~/Library/Caches/SubZeroAstro`"],
   ["Settings", "Windows registry (SubZeroAstro settings)", "`~/Library/Preferences`"],
+  ["Settings from before you joined a profile (4.6)", "`%LOCALAPPDATA%\\SubZeroAstro\\Settings backups`", "`~/Library/Application Support/SubZeroAstro/Settings backups`"],
+  ["Your profile (4.6)", "*SubZeroAstro Profile.json* in the NAS folder you chose", "the same file"],
 ], [2200, 3600, 3560]);
 
 sec("13.3", "Organize My Astro Files", ["Organize My Astro Files", "Organize", "Library layout", "Darks library", "NAS", "Undo Last Run", "Duplicates", "One computer only", "Automatic jobs"]);

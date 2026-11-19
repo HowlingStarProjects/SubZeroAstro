@@ -918,6 +918,13 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         # Settings keep their original storage name so nothing is lost after the rename
         self.settings = QSettings("FITSBlasterWin", "FITSBlasterWin")
+        # My Profile: settings shared with your other computers through the NAS - brought up to date before
+        # anything reads them (a NAS that doesn't answer within a few seconds is caught up with later)
+        import profile_sync
+        self.profile_syncer = profile_sync.Syncer(lambda: QSettings("FITSBlasterWin", "FITSBlasterWin"),
+                                                  APP_VERSION)
+        if "--selftest" not in sys.argv and self.profile_syncer.start(force=True) is not None:
+            self.profile_syncer.wait(4)
 
         self.frames: dict[int, core.Frame] = {}
         self.order: list[int] = []
@@ -978,6 +985,12 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(8000, lambda: self.set_asiair_night(True, int(self.settings.value("asiair/every", 10)
                                                                               or 10)))
         QTimer.singleShot(3000, self.cleanup_checkpoints)
+        self.profile_timer = QTimer(self)                      # My Profile: in step with the other computers
+        self.profile_timer.setInterval(self.profile_syncer.EVERY_S * 1000)
+        self.profile_timer.timeout.connect(lambda: self.profile_syncer.start(force=True))
+        self.profile_timer.start()
+        QApplication.instance().applicationStateChanged.connect(
+            lambda st: self.profile_syncer.start() if st == Qt.ApplicationActive else None)
         QTimer.singleShot(1200, self.tools_banner.start_check)     # optional helpers, checked in the background
         if "--selftest" not in sys.argv:
             QTimer.singleShot(4000, self.update_banner.start_check)  # a newer version on GitHub? (background)
@@ -1489,6 +1502,13 @@ class MainWindow(QMainWindow):
         m.addAction(self.act_fit)
         m.addAction(self.act_100)
         m = mb.addMenu("&Settings")
+        a = QAction("My Profile (same settings on every computer)…", self)
+        a.setToolTip("Keep your settings in a profile on your NAS so every computer uses the same rigs, location "
+                     "and choices; Export / Import My Settings")
+        a.triggered.connect(self.open_profile)
+        m.addAction(a)
+        self.act_profile = a
+        m.addSeparator()
         sm = m.addMenu("Star measurement")
         for a in self.mode_actions.values():
             sm.addAction(a)
@@ -1606,6 +1626,12 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             return False
 
+    def open_profile(self):
+        import profile_window
+        dlg = profile_window.ProfileDialog(self, self.settings, self.profile_syncer, APP_VERSION)
+        dlg.exec()
+        return dlg
+
     def closeEvent(self, event):
         self.settings.setValue("window/fill", self.fills_screen())      # next start: fill the screen again
         self.settings.setValue("geometry", self.saveGeometry())
@@ -1615,6 +1641,8 @@ class MainWindow(QMainWindow):
         self.settings.setValue("advance", self.act_advance.isChecked())
         self.settings.setValue("measure_mode", self.measure_mode())
         self.settings.setValue("chart_metric", self.chart_metric.currentData())
+        if self.profile_syncer.start(force=True) is not None:    # this session's changes reach the profile
+            self.profile_syncer.wait(5)
         self.generation += 1
         self.analyze_pool.clear()
         self.display_pool.clear()
