@@ -712,16 +712,40 @@ def apply_wcs(m: Master, cards):
 # Built-in gradient removal
 # ==========================================================================
 
-def builtin_gradient(plane: np.ndarray, degree=3, grid=(24, 16)):
+def keep_mask(shape, keep) -> "np.ndarray | None":
+    """(h, w) True inside the areas you marked as nebula to keep (ellipses given by their boxes x0, y0, x1, y1)."""
+    if not keep:
+        return None
+    h, w = shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    m = np.zeros((h, w), bool)
+    for x0, y0, x1, y1 in keep:
+        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        rx, ry = max(abs(x1 - x0) / 2.0, 1.0), max(abs(y1 - y0) / 2.0, 1.0)
+        m |= ((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2 <= 1.0
+    return m
+
+
+def shift_keep(keep, dx, dy) -> list:
+    """Marked areas moved with a crop (dx, dy = the crop's top-left corner)."""
+    return [[x0 - dx, y0 - dy, x1 - dx, y1 - dy] for x0, y0, x1, y1 in (keep or [])]
+
+
+def builtin_gradient(plane: np.ndarray, degree=3, grid=(24, 16), keep=None):
     """Fit a smooth 2-D polynomial to the sky (stars and bright objects ignored)
-    and subtract it, keeping the overall sky level."""
+    and subtract it, keeping the overall sky level.
+    keep: areas you marked as nebula ([x0, y0, x1, y1] ellipses): no sky samples are taken there, so their faint
+    glow is not taken for a gradient and wiped out."""
     h, w = plane.shape
     gx, gy = grid
     ys = np.linspace(0, h, gy + 1).astype(int)
     xs = np.linspace(0, w, gx + 1).astype(int)
+    km = keep_mask((h, w), keep)
     pts, vals = [], []
     for i in range(gy):
         for j in range(gx):
+            if km is not None and km[ys[i]:ys[i + 1]:4, xs[j]:xs[j + 1]:4].mean() > 0.2:
+                continue                            # mostly inside a marked nebula: not sky
             box = plane[ys[i]:ys[i + 1]:2, xs[j]:xs[j + 1]:2]
             med = np.median(box)
             mad = np.median(np.abs(box - med)) * 1.4826 + 1e-6
@@ -734,8 +758,10 @@ def builtin_gradient(plane: np.ndarray, degree=3, grid=(24, 16)):
     # drop samples sitting on bright nebulae / galaxies
     med = np.median(vals)
     mad = np.median(np.abs(vals - med)) * 1.4826 + 1e-6
-    keep = vals < med + 3 * mad
-    pts, vals = pts[keep], vals[keep]
+    ok = vals < med + 3 * mad
+    pts, vals = pts[ok], vals[ok]
+    while degree > 1 and len(vals) < 3 * (degree + 1) * (degree + 2) // 2:
+        degree -= 1                                  # few sky samples left (big marked areas): a gentler model
 
     def terms(x, y):
         return np.stack([x ** i * y ** j for i in range(degree + 1) for j in range(degree + 1 - i)], -1)
@@ -1079,7 +1105,11 @@ def plan_steps(masters: list, opts) -> list:
         out.append(("solve", json.dumps([round(float(opts.solve_radius), 3)]), None))
     if opts.gradient:
         tool = "graxpert" if opts.gradient_tool == "graxpert" and opts.graxpert else "builtin"
+        if opts.keep_areas:
+            tool = "builtin"                 # GraXpert can't be told which areas to keep: your marks need the built-in
         sig = [tool] + ([round(float(opts.gx_smoothing), 4), opts.gx_correction] if tool == "graxpert" else [])
+        if opts.keep_areas:
+            sig.append([[int(v) for v in a] for a in opts.keep_areas])
         out.append(("gradient", json.dumps(sig), tool))
     rc = None
     comet = is_comet_set(masters)
@@ -1174,6 +1204,8 @@ class PrepareOptions:
     out_dir: str | None = None              # default: <master folder>/Prepared
     work_dir: str | None = None
     checkpoints: bool = True                # save after each step; resume / go back
+    keep_areas: list = field(default_factory=list)   # nebula you marked to keep: [x0, y0, x1, y1] ellipses, in the
+                                                     # masters' own pixels (before cropping); built-in removal only
 
 
 _TARGETISH = re.compile(r"^(NGC|IC|M|SH2|SH|LDN|LBN|VDB|ABELL|ARP|UGC|PGC|C|B|CED|GUM|RCW|HICKSON|HCG)"
@@ -1243,6 +1275,8 @@ def run_prepare(masters: list, opts: PrepareOptions, progress=None, log=None, ca
             cps.restore(start, masters, stars_images)
             lg("Resuming from saved progress — already done: " + ", ".join(t["title"] for t in cps.steps))
     overlap = None
+    # where the masters' top-left corner now is in the picture you marked areas on (cropping moves it)
+    origin = next(((max(0, int(e[0])), max(0, int(e[1]))) for step, _s, e in plan if step == "crop"), (0, 0))
     if start == 0 and needs_line_up(masters):
         pr("Lining up the masters", 0.0)
         overlap = line_up(masters, lg)
@@ -1250,6 +1284,7 @@ def run_prepare(masters: list, opts: PrepareOptions, progress=None, log=None, ca
             for m in masters:
                 crop(m, overlap)
             lg(f"Trimmed to the area all masters cover: {overlap}")
+            origin = (max(0, int(overlap[0])), max(0, int(overlap[1])))
             overlap = None
     if opts.solve and not opts.astap:
         lg("Plate solve skipped — set the ASTAP folder to enable it")
@@ -1270,6 +1305,7 @@ def run_prepare(masters: list, opts: PrepareOptions, progress=None, log=None, ca
             if overlap is not None:                  # stay inside the area all lined-up masters cover
                 extra = _intersect(tuple(int(v) for v in extra), overlap)
             edge_note = crop_outside_note(extra, common_autocrop(masters))
+            origin = (max(0, int(extra[0])), max(0, int(extra[1])))
             for m in masters:
                 crop(m, extra)
             lg(f"Cropped {n} master(s) to {extra}")
@@ -1301,6 +1337,11 @@ def run_prepare(masters: list, opts: PrepareOptions, progress=None, log=None, ca
                 except Exception as e:  # noqa: BLE001 - plate solving is optional: never stop the run
                     lg(f"Plate solve skipped for {m.name} (unexpected problem: {type(e).__name__}: {e})")
         elif step == "gradient":
+            keep = shift_keep(opts.keep_areas, *origin) if opts.keep_areas else None
+            if keep:
+                lg(f"    {len(keep)} area(s) you marked as nebula are kept out of the gradient model"
+                   + (" - the built-in gradient removal is used, as GraXpert can't be told which areas to keep"
+                      if opts.gradient_tool == "graxpert" and opts.graxpert else ""))
             for i, m in enumerate(masters):
                 pr(f"Removing gradients: {m.name}", s0 + ds * i / n)
                 if extra == "graxpert":
@@ -1329,8 +1370,9 @@ def run_prepare(masters: list, opts: PrepareOptions, progress=None, log=None, ca
                         m.data = np.stack([builtin_gradient(p) for p in m.data])
                         m.steps.append(("gradient", "Gradients removed (built-in polynomial model)"))
                 else:
-                    m.data = np.stack([builtin_gradient(p) for p in m.data])
-                    m.steps.append(("gradient", "Gradients removed (built-in polynomial model)"))
+                    m.data = np.stack([builtin_gradient(p, keep=keep) for p in m.data])
+                    m.steps.append(("gradient", "Gradients removed (built-in polynomial model" +
+                                    (f", {len(keep)} marked nebula area(s) kept)" if keep else ")")))
         else:                               # RC-Astro bxt / nxt / sxt
             key = step
             spec, args = extra

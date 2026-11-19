@@ -43,6 +43,38 @@ def _frame(rng, stars, fwhm=3.0, ecc=0.1, transp=1.0, bg=1000.0, noise=14.0, h=9
     return np.clip(img, 0, 65535)
 
 
+def _cal_field(folder: Path, cast=(1.35, 1.0, 0.7), shift=(-12, 7), flip=False):
+    """A plate-solved colour picture whose stars have known catalogue colours, with a colour cast: (rgb, solved
+    master path, catalogue reply text). The picture was trimmed after solving (shift) and maybe stored upside down."""
+    import framing
+    rng = np.random.default_rng(3)
+    H, W, sc, ang = 700, 1000, 2.0 / 3600, np.radians(25)
+    hdr = {"OBJECT": "CalTest", "CTYPE1": "RA---TAN", "CTYPE2": "DEC--TAN", "CRVAL1": 83.8, "CRVAL2": -5.4,
+           "CRPIX1": W / 2, "CRPIX2": H / 2, "CD1_1": -sc * np.cos(ang), "CD1_2": sc * np.sin(ang),
+           "CD2_1": sc * np.sin(ang), "CD2_2": sc * np.cos(ang)}
+    w = framing.wcs_of(hdr)
+    xs, ys = rng.uniform(-40, W + 40, 260), rng.uniform(-40, H + 40, 260)
+    cat = np.array([(*framing.pixel_to_sky(w, x + 1, y + 1), rng.uniform(9, 15), rng.uniform(0.3, 2.0))
+                    for x, y in zip(xs, ys)])
+    img = np.full((3, H, W), 0.02, np.float32) + rng.normal(0, 0.0008, (3, H, W)).astype(np.float32)
+    yy, xx = np.mgrid[-10:11, -10:11]
+    for x, y, (_ra, _de, g, c) in zip(xs, ys, cat):
+        x2, y2 = x + shift[0], y + shift[1]
+        xi, yi = int(round(x2)), int(round(y2))
+        if not (10 <= xi < W - 11 and 10 <= yi < H - 11):
+            continue
+        prof = 0.5 * 10 ** (-0.4 * (g - 9)) * np.exp(-((xx - (x2 - xi)) ** 2 + (yy - (y2 - yi)) ** 2) / (2 * 1.4 ** 2))
+        for k, col in enumerate((np.exp(0.9 * (c - 0.82)) * cast[0], 1.0, np.exp(-1.0 * (c - 0.82)) * cast[2])):
+            img[k, yi - 10:yi + 11, xi - 10:xi + 11] += col * prof
+    if flip:
+        img = np.ascontiguousarray(img[:, ::-1])
+    path = folder / "caltest_solved.fits"
+    core.write_fits(path, img[1] * 65535, hdr, bitpix=-32)
+    lines = ["#VizieR test", "", "RA_ICRS\tDE_ICRS\tGmag\tBP-RP", "deg\tdeg\tmag\tmag", "---\t---\t---\t---"]
+    lines += ["\t".join(f"{v:.7f}" for v in r) for r in cat] + ["", ""]
+    return img, path, "\n".join(lines)
+
+
 def make_session(folder: Path):
     rng = np.random.default_rng(11)
     stars = [(rng.uniform(30, 870), rng.uniform(30, 1320), rng.uniform(400, 12000)) for _ in range(220)]
@@ -107,6 +139,11 @@ def run(app, out_dir: Path) -> int:
     sys.excepthook = excepthook
 
     session = Path(tempfile.mkdtemp(prefix="sza_selftest_")) / "M33"
+    import colour_cal as _ccal
+
+    def _offline(url):
+        raise OSError("no star catalogue in the self-test")
+    _ccal.fetch_hook = _offline                     # the self-test never asks the internet (and keeps no catalogue)
     session.mkdir()
     t0 = time.time()
     bad = make_session(session)
@@ -606,6 +643,102 @@ def run(app, out_dir: Path) -> int:
     check(_gv5.label == "Cluster glow warm white" and _gc5[2] < _gc5[0] and _gc5[1] > 0.9 * _gc5[0],
           f"a star cluster's glow is balanced to a warm white (was R 0.78 G 0.69 B 1.00, now "
           f"R {_gc5[0]:.2f} G {_gc5[1]:.2f} B {_gc5[2]:.2f})")
+
+    # --- star colours from the Gaia catalogue (like PixInsight's SPCC) -------------------------------------------
+    import framing as _frm
+    _cfd = session.parent / "colourcal"
+    _cfd.mkdir(exist_ok=True)
+    _cw = _frm.wcs_of({"CRVAL1": 83.8, "CRVAL2": -5.4, "CRPIX1": 500, "CRPIX2": 350, "CD1_1": -5e-4, "CD1_2": 2e-4,
+                       "CD2_1": 2e-4, "CD2_2": 5e-4})
+    _cra, _cde = _frm.pixel_to_sky(_cw, 123.0, 456.0)
+    _cpx, _cpy = _ccal.sky_to_pixel(_cw, [_cra], [_cde])
+    check(abs(_cpx[0] - 123.0) < 1e-6 and abs(_cpy[0] - 456.0) < 1e-6,
+          f"catalogue stars are placed on the picture exactly (pixel 123, 456 -> sky -> {_cpx[0]:.4f}, {_cpy[0]:.4f})")
+    _cres = []
+    for _cflip in (False, True):
+        _cimg, _cpath, _ctxt = _cal_field(_cfd, flip=_cflip)
+        _ccal.fetch_hook = lambda url, _t=_ctxt: _t
+        try:
+            _cr = _ccal.calibrate(_cimg, [str(_cpath)])
+            _cres.append((_cr["white"][0], _cr["white"][2], _cr["n"]))
+        except _ccal.CalError as _ce:
+            _cres.append((0.0, 0.0, str(_ce)))
+    check(all(abs(r_ * 1.35 - 1) < 0.03 and abs(b_ * 0.7 - 1) < 0.03 and n_ >= 40 for r_, b_, n_ in _cres),
+          f"star catalogue colours undo a colour cast (red x1.35, blue x0.70) from the stars' Gaia colours, also on a "
+          f"picture trimmed after solving or stored upside down (white R, B, stars: {_cres}; want 0.74, 1.43)")
+    _cimg, _cpath, _ctxt = _cal_field(_cfd)
+    _ccal.fetch_hook = lambda url, _t=_ctxt: _t
+    _cs = _fnc.State(rgb=_cimg, kind="osc", target="M 42", sources=[str(_cpath)], linear=True)
+    _cv = _fnc.TOOLS["balance"].variants(_cs)
+    _cvr = next((v for v in _cv if v.recommended), None)
+    _cout = _fnc.TOOLS["balance"].apply(_cs, _cvr.params).rgb if _cvr else None
+    _ccal.fetch_hook = _offline
+    _fnc.TOOLS["balance"]._cal_memo = (None, None)
+    _cs2 = _fnc.State(rgb=_cimg.copy(), kind="osc", target="M 42", sources=[str(_cpath)], linear=True)
+    _cv2 = _fnc.TOOLS["balance"].variants(_cs2)
+    check(_cvr is not None and _cvr.label == "Star catalogue colours" and "Gaia" in _cvr.note
+          and not any(v.label == "Star catalogue colours" for v in _cv2)
+          and "internet" in _cv2[0].note, f"Balance Colours suggests 'Star catalogue colours' for a plate-solved "
+                                          f"picture, and says why not when the catalogue can't be reached "
+                                          f"({[v.label for v in _cv]}; offline: {_cv2[0].note[-120:]})")
+    _cs3 = _fnc.State(rgb=_cimg.copy(), kind="osc", target="M 42", sources=[str(session / "Light_Ha_001.fits")],
+                      linear=True)
+    _cv3 = _fnc.TOOLS["balance"].variants(_cs3)
+    check("not plate solved" in _cv3[0].note, f"an unsolved picture is told to plate solve in Prepare first "
+                                              f"({_cv3[0].note[-110:]})")
+    _cparsed = _ccal.parse_tsv(_ctxt)
+    check(_cparsed.shape == (260, 4) and _cout is not None and _cout.shape == _cimg.shape,
+          f"the star catalogue's answer is read ({_cparsed.shape[0]} stars) and the balance applied")
+
+    # --- work on part of the picture: bright parts / faint parts (masks) -----------------------------------------
+    _my, _mx = np.mgrid[:400, :600].astype(np.float32)
+    _mneb = 0.5 * np.exp(-((_mx - 300) ** 2 + (_my - 200) ** 2) / (2 * 70 ** 2))
+    _mimg = np.clip(0.1 + _mneb + np.random.default_rng(0).normal(0, 0.01, (400, 600)), 0, 1).astype(np.float32)
+    _ms = _fnc.State(rgb=np.stack([_mimg, _mimg * 0.8, _mimg * 0.7]), kind="osc", target="IC 1805", linear=False,
+                     done=["stretch"])
+    _mres = {}
+    for _mkey in ("saturation", "curves", "local"):
+        _mt = _fnc.TOOLS[_mkey]
+        _mv = [v for v in _mt.variants(_ms)][-1]
+        for _marea in ("all", "bright", "faint"):
+            _md = np.abs(_mt.apply(_ms, {**_mv.params, "area": _marea}).rgb - _ms.rgb).sum(0)
+            _mres[(_mkey, _marea)] = (float(_md[180:220, 280:320].mean()), float(_md[:40, :40].mean()))
+    _mok = all(_mres[(k, "bright")][1] < 0.15 * max(_mres[(k, "all")][1], 1e-6) + 1e-5
+               and _mres[(k, "faint")][0] < 0.15 * max(_mres[(k, "all")][0], 1e-6) + 1e-5
+               and abs(_mres[(k, "bright")][0] - _mres[(k, "all")][0]) < 0.2 * _mres[(k, "all")][0] + 1e-5
+               for k in ("saturation", "curves", "local"))
+    check(_mok, "Saturation, Curves and Local Contrast can work on the bright parts only (the sky untouched) or the "
+                "faint parts only (the nebula untouched): " +
+                ", ".join(f"{k}/{a} centre {v[0]:.3f} sky {v[1]:.3f}" for (k, a), v in _mres.items()))
+    _mm = _fnc.area_mask(_ms, "bright")
+    _mm2 = _fnc.area_mask(_ms, "bright", 0.95)
+    _mprev = _fnc.TOOLS["curves"].preview(_ms, {**_fnc.TOOLS["curves"].variants(_ms)[0].params, "area": "bright",
+                                                "show_mask": True})
+    check(_mm[200, 300] > 0.95 and _mm[10, 10] < 0.05 and _mm2.mean() < _mm.mean() and _mprev.shape == (400, 600, 3)
+          and set(_fnc.AREA_TOOLS) >= {"saturation", "curves", "colours", "local", "denoise"},
+          f"the bright-parts mask covers the nebula and not the sky, the slider moves its edge "
+          f"({_mm.mean():.2f} -> {_mm2.mean():.2f} of the picture), and 'Show what will change' tints it")
+
+    # --- gradient removal keeps the nebula you marked ------------------------------------------------------------
+    import prepare as _prp
+    _gh, _gw = 800, 1200
+    _gyy, _gxx = np.mgrid[:_gh, :_gw].astype(np.float32)
+    _gneb = 60 * np.exp(-(((_gxx - 700) / 260) ** 2 + ((_gyy - 380) / 200) ** 2))
+    _gim = (1200 + 300 * (_gxx / _gw) + 150 * (_gyy / _gh) ** 2 + _gneb
+            + np.random.default_rng(1).normal(0, 5, (_gh, _gw))).astype(np.float32)
+    _gkept = []
+    for _gk in (None, [[400, 150, 1000, 620]]):
+        _go = _prp.builtin_gradient(_gim, keep=_gk)
+        _gkept.append((float(_go[330:430, 650:750].mean() - np.median(_go[:60, :60])),
+                       float(abs(_go[:, :80].mean() - _go[:, -80:].mean()))))
+    _gplan = _prp.plan_steps([], _prp.PrepareOptions(crop=False, solve=False, gradient_tool="graxpert",
+                                                     graxpert="GraXpert.exe", keep_areas=[[400, 150, 1000, 620]]))
+    check(_gkept[1][0] > 40 and _gkept[1][0] > 2 * _gkept[0][0] and _gkept[1][1] < 3
+          and _gplan[0][2] == "builtin" and "400" in _gplan[0][1]
+          and _prp.shift_keep([[400, 150, 1000, 620]], 100, 50) == [[300, 100, 900, 570]],
+          f"gradient removal keeps a faint nebula you marked (left {_gkept[1][0]:.0f} of 60, unmarked "
+          f"{_gkept[0][0]:.0f}; sky still flat: {_gkept[1][1]:.1f}), marks move with the crop and use the built-in "
+          f"removal")
     # a globular's core: the blended glow between its stars is lowered, the stars kept (M28's core was a bright haze)
     _qy, _qx = np.mgrid[:600, :600].astype(np.float32)
     _qglow = 0.6 * np.exp(-((_qx - 300) ** 2 + (_qy - 300) ** 2) / (2 * 60 ** 2))
@@ -2555,6 +2688,35 @@ def run(app, out_dir: Path) -> int:
         import tools as _tl
         check(_tl._clean_console("\x1b[1mHi\x1b[0m\r\nwait 10%\rwait 100%\n\n\n\nok") == "Hi\nwait 100%\n\nok",
               "rc-astro console messages shown without colour codes or progress redraws")
+        # Mark Nebula to Keep: ovals drawn on the picture, handed to the built-in gradient removal
+        _kd = _pwx.KeepAreasDialog(pw, *pw._look, [[100, 100, 300, 250]])
+        _kv = _kd.view
+        from PySide6.QtGui import QMouseEvent as _KME
+        from PySide6.QtCore import QEvent as _KEv, QPointF as _KPF
+
+        def _kmouse(kind, x, y, btn=Qt.LeftButton):
+            _p = _kv.mapFromScene(_KPF(x, y))
+            _kv_ev = _KME(kind, _KPF(_p), _KPF(_kv.mapToGlobal(_p)), btn, btn if kind != _KEv.MouseButtonRelease
+                          else Qt.NoButton, Qt.NoModifier)
+            {_KEv.MouseButtonPress: _kv.mousePressEvent, _KEv.MouseMove: _kv.mouseMoveEvent,
+             _KEv.MouseButtonRelease: _kv.mouseReleaseEvent}[kind](_kv_ev)
+        _kmouse(_KEv.MouseButtonPress, 400, 300)
+        _kmouse(_KEv.MouseMove, 600, 420)
+        _kmouse(_KEv.MouseButtonRelease, 600, 420)
+        _ka1 = _kd.areas()
+        _kmouse(_KEv.MouseButtonPress, 200, 175, Qt.RightButton)          # right-click removes the first oval
+        _ka2 = _kd.areas()
+        _kd.deleteLater()
+        pw.mark_keep_areas(_ka2)
+        _kopt = pw.options_for(0)
+        _kplan = __import__("prepare").plan_steps(pw.sets[0], _kopt)
+        check(len(_ka1) == 2 and len(_ka2) == 1 and abs(_ka2[0][0] - 400) <= 2 and abs(_ka2[0][3] - 420) <= 2
+              and _kopt.keep_areas == _ka2 and "1 area" in pw.keep_label.text()
+              and (not _kopt.gradient or any(st_ == "gradient" and ex_ == "builtin" for st_, _sg, ex_ in _kplan)),
+              f"Mark Nebula to Keep: drag draws an oval, right-click removes one, and the marks go to the built-in "
+              f"gradient removal ({_ka1} -> {_ka2}; {pw.keep_label.text()})")
+        pw.mark_keep_areas([])
+        check(pw.options_for(0).keep_areas == [] and not pw.keep_label.text(), "marks can be removed again")
         pw.resize(1450, 900)
         QTimer.singleShot(900, rc_lic_1 if state["fake"] else shots_11)
 
@@ -3062,6 +3224,16 @@ def run(app, out_dir: Path) -> int:
                 check(fw.chk_mask.isVisibleTo(fw) and "not applied" in fw.preview_hint.text(),
                       "Tame Bright Core previews with 'Show what will change'")
                 shot("20_finish_tame_core_mask.png", fw)
+            if key == "local":
+                _aw = fw.area_row.isVisibleTo(fw) and not fw.area_level.isVisibleTo(fw)
+                fw.area.setCurrentIndex(fw.area.findData("bright"))
+                fw.chk_mask.setChecked(True)
+                _ap = fw.current_params()
+                check(_aw and fw.area_level.isVisibleTo(fw) and fw.chk_mask.isVisibleTo(fw)
+                      and _ap.get("area") == "bright" and "not applied" in fw.preview_hint.text(),
+                      f"a step can be set to work on the bright parts only, with a slider for where bright begins "
+                      f"and 'Show what will change' ({_ap.get('area')}, level {_ap.get('area_level')})")
+                shot("20b_finish_bright_parts_only.png", fw)
             if key == "spotfix":
                 _fs = getattr(fw, "disp_factor", 1.0)
                 _start_seen = fw.spot_r / _fs
@@ -3110,6 +3282,9 @@ def run(app, out_dir: Path) -> int:
                       f"Spot Fix: click places a circle, the wheel resizes it at once ({_r0:.0f} -> {_r1:.0f} px), "
                       "a circle can be picked and dragged, a dashed ring shows the size, right-click removes")
             fw.apply_choice()
+        check(any(x["label"].endswith("(bright parts only)") and "Hidden Structure" in x["label"] for x in fw.project.steps),
+              f"the step list says a step worked on the bright parts only "
+              f"({[x['label'] for x in fw.project.steps][-3:]})")
         check("core" in fw.state.done and "local" in fw.state.done and "spotfix" in fw.state.done,
               "optional tools (Tame Bright Core, local contrast, Spot Fix) work")
         n1 = len(fw.project.steps)
