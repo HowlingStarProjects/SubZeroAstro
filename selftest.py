@@ -5549,6 +5549,7 @@ def run(app, out_dir: Path) -> int:
         # Stack › Stitch a Mosaic…: four overlapping panels of one nebula (each a little turned, brighter or
         # darker and with its own sky glow) are placed, fine-tuned on their shared stars, evened out and blended
         import mosaic as _mz
+        import stacking as _mz_st
         import mosaic_window as _mzw
         import prepare as _mz_P
         _mz_dir = _au_root / "mosaic"
@@ -5575,8 +5576,8 @@ def run(app, out_dir: Path) -> int:
                     _th = _m.radians(0.4 + 0.1 * _k)
                     _cd = np.array([[-_sc * _m.cos(_th), _sc * _m.sin(_th)], [_sc * _m.sin(_th), _sc * _m.cos(_th)]])
                     _w = {"crval": np.radians([_pra, _pde]), "crpix": np.array([W / 2 + .5, H / 2 + .5]), "cd": _cd}
-                    _x, _y = _st.__dict__["_wcs_pix"](_w, np.radians(_sra), np.radians(_sde))
-                    _gra, _gde = _st.__dict__["_wcs_sky"](_w, _xx.ravel().astype(float), _yy.ravel().astype(float))
+                    _x, _y = _mz_st._wcs_pix(_w, np.radians(_sra), np.radians(_sde))
+                    _gra, _gde = _mz_st._wcs_sky(_w, _xx.ravel().astype(float), _yy.ravel().astype(float))
                     _sep = np.degrees(np.hypot((_gra - _m.radians(_ra0)) * _m.cos(_m.radians(_de0)),
                                                _gde - _m.radians(_de0)))
                     _img = (3000 * np.exp(-(_sep / (_span / 6)) ** 2)).reshape(H, W).astype(np.float32)
@@ -5595,7 +5596,7 @@ def run(app, out_dir: Path) -> int:
                                 ("CRVAL2", _pde, ""), ("CRPIX1", W / 2 + .5, ""), ("CRPIX2", H / 2 + .5, ""),
                                 ("CD1_1", _cd[0, 0], ""), ("CD1_2", _cd[0, 1], ""), ("CD2_1", _cd[1, 0], ""),
                                 ("CD2_2", _cd[1, 1], "")]
-                    _out += _st.save_master_file(folder / f"TestNeb_Panel{_k}_{filt}_Master", _img, _hd)
+                    _out += _mz_st.save_master_file(folder / f"TestNeb_Panel{_k}_{filt}_Master", _img, _hd)
             return _out
         check(_mz.panel_base("M31 Panel 2") == "M31" and _mz.panel_base("M31-Panel2") == "M31"
               and _mz.panel_base("M31_2") == "M31" and _mz.panel_base("NGC 7000") == "NGC 7000"
@@ -5622,12 +5623,12 @@ def run(app, out_dir: Path) -> int:
               f"Stitch a Mosaic without plate solutions or ASTAP: the panels are placed by the stars they share "
               f"({_mz_res2.star_pairs} stars agree to {_mz_res2.star_rms:.2f} px)")
         # frames of one target name but four pointings are stacked as four panels; a comet is never split
-        _mz_inf = lambda ra_, i_, t_="M31": _st.LightFrame(_st.ImgInfo(
+        _mz_inf = lambda ra_, i_, t_="M31": _mz_st.LightFrame(_mz_st.ImgInfo(
             Path(f"mz{i_}.fits"), "light", False, "cam", None, None, 60, None, "Ha", 6248, 4176, None, None, 1, None,
             None, f"2026-01-01T00:{i_:02d}:00", 400, None, None, t_, None, ra=ra_, dec=41.27, scale=1.94))
-        _mz_g = _st.group_lights([_mz_inf(10.68 + 0.0005 * i_, i_) for i_ in range(4)]
-                                 + [_mz_inf(9.1, 10 + i_) for i_ in range(4)], _st.Rigs())
-        _mz_c = _st.mosaic_panels([_mz_inf(1.0, i_, "C/2023 A3") for i_ in range(3)]
+        _mz_g = _mz_st.group_lights([_mz_inf(10.68 + 0.0005 * i_, i_) for i_ in range(4)]
+                                 + [_mz_inf(9.1, 10 + i_) for i_ in range(4)], _mz_st.Rigs())
+        _mz_c = _mz_st.mosaic_panels([_mz_inf(1.0, i_, "C/2023 A3") for i_ in range(3)]
                                   + [_mz_inf(3.0, 5 + i_, "C/2023 A3") for i_ in range(3)])
         check([g_.target for g_ in _mz_g] == ["M31-Panel1", "M31-Panel2"] and len(_mz_c) == 1,
               f"Stacking: frames saved under one target name but pointed at two places are stacked as two mosaic "
