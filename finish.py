@@ -1518,6 +1518,18 @@ class BalanceColours(Tool):
         else:
             out[0].recommended = True
             out[0].note += " (not enough clean stars to judge star colour)"
+        cal, why_not = self.catalogue(s)
+        if cal is not None:
+            # the Gaia star catalogue knows each star's true colour: sun-like stars made white (PixInsight's SPCC
+            # idea) - more accurate than taking the average star as white, which a field of young blue or old red
+            # stars pushes off; it replaces 'Stars white' as the suggestion
+            star_pick = any(v.recommended for v in out)
+            for v in out:
+                v.recommended = False
+            out.insert(0, Variant("Star catalogue colours", {**base, "white": cal["white"]},
+                                  cal["note"] + " - like PixInsight's colour calibration (SPCC)", star_pick))
+        elif why_not:
+            out[0].note += f" (star catalogue colours: {why_not})"
         if target_type(s) == "planetary nebula" and fac:
             # a planetary's colours are its gas, not starlight: balanced on the stars, the Helix's Ha (added to
             # red) went all red and its teal centre grey-blue. The sky alone keeps the look tuned on M27 and the Helix
@@ -1548,6 +1560,26 @@ class BalanceColours(Tool):
         return out
 
     CLUSTER_WARM = (1.0, 0.95, 0.85)        # R : G : B of a globular cluster's integrated light
+    BROADBAND = ("osc", "smart", "mono_rgb", "mono_lrgb")
+    _cal_memo: tuple = (None, None)
+
+    def catalogue(self, s):
+        """(result of colour_cal.calibrate or None, why not in plain words or ''). Broadband colour pictures from
+        plate-solved masters only; remembered for the same picture (the choices are made more than once)."""
+        if s.kind not in self.BROADBAND or not s.sources or s.rgb is None or s.rgb.shape[0] != 3:
+            return None, ""
+        import colour_cal
+        key = (tuple(s.sources), s.rgb.shape, round(float(s.rgb[:, ::97, ::89].sum()), 4))
+        if self._cal_memo[0] == key:
+            return self._cal_memo[1]
+        try:
+            res = (colour_cal.calibrate(s.rgb, s.sources, s.stars if not s.stars_hidden else None), "")
+        except colour_cal.CalError as e:
+            res = (None, str(e))
+        except Exception as e:  # noqa: BLE001 - never stops Balance Colours: the other versions are still there
+            res = (None, f"unexpected problem ({type(e).__name__}: {e})")
+        self._cal_memo = (key, res)
+        return res
 
     def sliders(self, s, params):
         return [Slider("warmth", "Warmth", -1.0, 1.0, params.get("warmth", 0.0), "Cooler (bluer) <-> warmer (redder)"),
@@ -5279,6 +5311,85 @@ REPEATABLE = ("balance", "scnr", "core", "cluster_core", "curves", "saturation",
               "sky", "denoise", "flip", "final_crop", "spotfix")
 for _k in REPEATABLE:
     TOOLS[_k].repeatable = True
+
+
+# --------------------------------------------------------------------------
+# Work on part of the picture (a mask, as in PixInsight): a step's result is kept only where the picture is bright
+# (the nebula or galaxy) or only where it is faint (the sky and faint outskirts), with a soft edge between.
+AREA_TOOLS = ("curves", "saturation", "colours", "local", "denoise", "scnr")
+AREAS = {"all": "Whole picture", "bright": "Bright parts only (nebula, galaxy)",
+         "faint": "Faint parts only (sky, faint wisps)"}
+AREA_LEVEL = 0.5                   # where "bright" begins: 0 = even faint glow counts, 1 = only the brightest
+
+
+def area_mask(s: State, area: str, level: float = AREA_LEVEL) -> "np.ndarray | None":
+    """(h, w) weights 0..1: how much of a step's result to keep at each pixel. Made from the picture before the
+    step, without its stars (a star is not 'the bright part'), smooth so no edge shows; None = everywhere."""
+    if area not in ("bright", "faint") or s.rgb is None:
+        return None
+    y = _lum(s.rgb).astype(np.float32)
+    h, w = y.shape
+    sm, _f = _small_plane(y, 500)
+    sm = -_min_filter(-_min_filter(sm, 2), 2)                  # opening: stars gone, nebula kept
+    sm = _blur(sm, max(2.0, max(sm.shape) / 100.0))
+    lo, hi = float(np.percentile(sm, 3)), float(np.percentile(sm, 99.7))
+    t = np.clip((sm - lo) / max(hi - lo, 1e-9), 0, 1)
+    if s.linear:
+        t = np.sqrt(t)                                         # unstretched: nebula sits near the sky's level
+    thr = 0.04 + 0.42 * float(np.clip(level, 0, 1))
+    wd = 0.6 * thr
+    u = np.clip((t - (thr - wd)) / (2 * wd), 0, 1)
+    m = u * u * (3 - 2 * u)                                    # soft edge
+    if area == "faint":
+        m = 1 - m
+    return _resize(m.astype(np.float32), h, w)
+
+
+def mask_tint(img8: np.ndarray, m: np.ndarray) -> np.ndarray:
+    """Show a mask on a preview: green tint where the step works, a yellow line along its edge."""
+    if m.shape != img8.shape[:2]:
+        m = _resize(m, *img8.shape[:2])
+    mm = m[..., None]
+    tint = np.array([40, 230, 110], np.float32)
+    out = img8 * (1 - 0.22 * mm) + tint * 0.22 * mm
+    edge = (m > 0.4) & (m < 0.6)
+    out[edge] = np.array([255, 225, 40], np.float32)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def _area_wrap(tool: Tool):
+    orig_apply, orig_preview = tool.apply, tool.preview
+
+    def apply(s, params, _orig=orig_apply):
+        area = (params or {}).get("area")
+        if area not in ("bright", "faint"):
+            return _orig(s, params)
+        p = {k: v for k, v in params.items() if k not in ("area", "area_level", "show_mask")}
+        before = merge_hidden_stars(s)
+        new = _orig(s, p)
+        m = area_mask(before, area, float(params.get("area_level", AREA_LEVEL)))
+        if m is not None and new.rgb is not None and before.rgb is not None and new.rgb.shape == before.rgb.shape:
+            new.rgb = (before.rgb + (new.rgb - before.rgb) * m[None]).astype(np.float32)
+        return new
+
+    def preview(s, params, _orig=orig_preview):
+        img = _orig(s, params)
+        if (params or {}).get("show_mask") and params.get("area") in ("bright", "faint"):
+            m = area_mask(merge_hidden_stars(s), params["area"], float(params.get("area_level", AREA_LEVEL)))
+            if m is not None:
+                img = mask_tint(img, m)
+        return img
+    tool.apply, tool.preview = apply, preview
+
+
+for _k in AREA_TOOLS:
+    _area_wrap(TOOLS[_k])
+
+
+def area_label(params) -> str:
+    """' (bright parts only)' for a step's name in the list, '' for the whole picture."""
+    a = (params or {}).get("area")
+    return {"bright": " (bright parts only)", "faint": " (faint parts only)"}.get(a, "")
 
 
 def thumb_state(tool: Tool, s: State, size=420) -> State:

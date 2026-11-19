@@ -242,7 +242,8 @@ class MosaicDialog(QDialog):
         self._finish()
         fl = ", ".join(res.filters)
         self.status.setText(f"Done: {res.name}, {res.panels} panels, {res.shape[1]:,} x {res.shape[0]:,} pixels "
-                            f"({fl}). Saved in {Path(res.files[0]).parent}" if res.files else "Nothing saved.")
+                            f"({fl}). Saved in {Path(res.files[0]).parent}, with a log of how each panel was placed and "
+                            "evened out" if res.files else "Nothing saved.")
         self.b_next.setEnabled(bool(res.files))
         try:
             import session_log as _slog

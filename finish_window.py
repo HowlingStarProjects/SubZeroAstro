@@ -702,6 +702,29 @@ class FinishWindow(QMainWindow):
         self.chk_mask.setToolTip("Tints the area this tool works on (the mask SubZeroAstro made for you) in green, with a yellow line along its edge")
         self.chk_mask.toggled.connect(lambda _on: self.schedule_preview())
         self.chk_mask.setVisible(False)
+        # Work on: the whole picture, or only its bright or faint parts (a mask)
+        self.area_row = QWidget()
+        ar = QGridLayout(self.area_row)
+        ar.setContentsMargins(0, 0, 0, 0)
+        ar.addWidget(QLabel("Work on:"), 0, 0)
+        self.area = QComboBox()
+        for k, v in F.AREAS.items():
+            self.area.addItem(v, k)
+        self.area.setToolTip("Use this step on the whole picture, or only where it is bright (the nebula or galaxy) "
+                             "or only where it is faint (the sky and faint wisps) - e.g. more colour in the nebula "
+                             "without colour noise in the sky. Tick 'Show what will change' to see the area.")
+        self.area.currentIndexChanged.connect(self._area_changed)
+        ar.addWidget(self.area, 0, 1, 1, 2)
+        self.area_level_label = QLabel("Bright begins at:")
+        ar.addWidget(self.area_level_label, 1, 0)
+        self.area_level = QSlider(Qt.Horizontal)
+        self.area_level.setRange(0, 100)
+        self.area_level.setValue(int(F.AREA_LEVEL * 100))
+        self.area_level.setToolTip("Left: even faint glow counts as bright. Right: only the brightest parts do.")
+        self.area_level.valueChanged.connect(lambda _v: self._area_changed(rerender=False))
+        ar.addWidget(self.area_level, 1, 1, 1, 2)
+        self.area_row.setVisible(False)
+        tl.addWidget(self.area_row)
         tl.addWidget(self.chk_mask)
         self.chk_star_bg = QCheckBox("Show the nebula behind the stars")
         self.chk_star_bg.setToolTip("The star steps show the stars on their own, so you can judge them. Tick to see "
@@ -1311,6 +1334,15 @@ class FinishWindow(QMainWindow):
         self.chk_mask.setChecked(False)
         self.chk_mask.blockSignals(False)
         has_mask = key == "core" or getattr(self.tool, "has_mask", False)
+        if not again:                              # a new step starts on the whole picture; Apply Again keeps it
+            self.area.blockSignals(True)
+            self.area_level.blockSignals(True)
+            self.area.setCurrentIndex(0)
+            self.area_level.setValue(int(F.AREA_LEVEL * 100))
+            self.area.blockSignals(False)
+            self.area_level.blockSignals(False)
+        self.area_row.setVisible(key in F.AREA_TOOLS)
+        self._area_widgets()
         self.chk_mask.setVisible(has_mask)
         self.chk_mask.setText(getattr(self.tool, "mask_label", "Show what will change"))
         self.chk_mask.setToolTip(getattr(self.tool, "mask_tip", "Tints the area this tool works on (the mask "
@@ -1725,8 +1757,35 @@ class FinishWindow(QMainWindow):
         self.view.set_crop(tuple(self.variants[0].params["rect"]) if which == "found" else (0, 0, w, h))
         self.preview_hint.setText("Drag the box, then press Crop to the Box. Nothing changes until then.")
 
+    def _area_on(self) -> bool:
+        return self.tool is not None and self.tool.key in F.AREA_TOOLS and self.area.currentData() in ("bright", "faint")
+
+    def _area_widgets(self):
+        on = self._area_on()
+        self.area_level.setVisible(on)
+        self.area_level_label.setVisible(on)
+        if self.tool is not None and self.tool.key in F.AREA_TOOLS:
+            self.chk_mask.setVisible(on)
+            self.chk_mask.setText("Show what will change")
+            self.chk_mask.setToolTip("Tints the part of the picture this step will change in green, with a yellow "
+                                     "line along its edge")
+
+    def _area_changed(self, *_a, rerender=True):
+        """Whole picture / bright parts / faint parts: the choices and the big preview follow."""
+        self._area_widgets()
+        if self.tool is None:
+            return
+        if rerender:
+            self._keep_choice = max(0, self.group.checkedId())
+            self.render_choices()
+        else:
+            self.schedule_preview()
+
     def extra_params(self) -> dict:
-        """Settings that live outside the picture choices (the signature's words, corner, colour)."""
+        """Settings that live outside the picture choices (the signature's words, corner, colour; the part of the
+        picture a step works on)."""
+        if self._area_on():
+            return {"area": self.area.currentData(), "area_level": self.area_level.value() / 100.0}
         if self.tool is not None and self.tool.key == "signature":
             corner = self.sign_corner.currentText().lower()
             p = {"text": self.sign_text.text().strip(), "target_text": self.sign_target.text().strip(),
@@ -1814,11 +1873,11 @@ class FinishWindow(QMainWindow):
             p.update(self.extra_params())
             return p
         if not self.fine_box.isChecked() or not self.fine_values:
-            return v.params
+            return {**v.params, **self.extra_params()}
         vals = {name: sp.lo + sl.value() * sp.step for name, (sl, sp) in self.sliders.items()}
         if "points" in self.fine_values:
             vals["points"] = self.fine_values["points"]
-        return t.tuned(self.state, v.params, vals)
+        return {**t.tuned(self.state, v.params, vals), **self.extra_params()}
 
     def schedule_preview(self):
         if self.tool is None:
@@ -1839,7 +1898,7 @@ class FinishWindow(QMainWindow):
             return
         params = self.current_params()
         tuned = self.fine_box.isChecked() and bool(self.fine_values)
-        if (t.key == "core" or getattr(t, "has_mask", False)) and self.chk_mask.isChecked():
+        if (t.key == "core" or getattr(t, "has_mask", False) or self._area_on()) and self.chk_mask.isChecked():
             params = dict(params, show_mask=True)
 
         def work():
@@ -2078,6 +2137,7 @@ class FinishWindow(QMainWindow):
                  else v.label + (" (fine-tuned)" if tuned else ""))
         if t.key == "flip":
             label = F.FlipPicture.describe(params)
+        label += F.area_label(params)
 
         if t.key == "flip" and "signature" in s.done and self.project is not None:
             plan = F.resign_plan(self.project.steps)
