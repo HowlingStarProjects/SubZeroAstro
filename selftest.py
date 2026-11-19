@@ -5711,7 +5711,8 @@ def run(app, out_dir: Path) -> int:
               and _asx_tu.get("timeup") and _asx_tu.get("left") == 3 and _asx_tu.get("copied") == 0
               and _asx_ok.get("copied") == 3 and "done - 3 new subs" in _as.short_text(_asx_ok)
               and _as.short_text({"name": "a", "new": 0, "copied": 0, "error": "", "failed": []}) == "nothing new"
-              and _as.size_text(2.7e9) == "2.7 GB" and _as.time_text(800) == "about 13 min",
+              and _as.size_text(2.7e9) == "2.7 GB" and _as.time_text(800) == "about 13 min"
+              and "connection to the ASIAIR broke" in _as.plain_error(OSError(22, "Invalid argument")),
               f"Fetch From My ASIAIRs: the status names every ASIAIR and what it is doing ({_asx_fin}); one that "
               f"stops answering is given up on in {_asx_secs:.1f} s with nothing half-copied left; a time limit leaves "
               f"the rest for next time")
