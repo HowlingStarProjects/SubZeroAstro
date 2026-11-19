@@ -1553,6 +1553,14 @@ class MainWindow(QMainWindow):
         a = QAction("Play the Intro Animation", self)
         a.triggered.connect(self.play_splash)
         m.addAction(a)
+        m.addSeparator()
+        # just for fun: two wishes every astrophotographer has
+        self.joke_actions = {}
+        for key, text in (("clouds", "Make Clouds Disappear"), ("bortle", "Make My Bortle Better")):
+            a = QAction(text, self)
+            a.triggered.connect(lambda _=False, k=key: self.show_joke(k))
+            m.addAction(a)
+            self.joke_actions[key] = a
 
     def play_splash(self):
         import splash
@@ -3702,6 +3710,20 @@ class MainWindow(QMainWindow):
             "Star measurement 'Fast' measures three bands across each frame (about a quarter "
             "of the file), which gives nearly the same numbers as 'Full frame' and is 3–4× "
             "faster on network drives."))
+
+    JOKES = {
+        "clouds": ("Make Clouds Disappear", "Clear skies, on demand!\n\nComing soon... Not! \N{CLOUD}"),
+        "bortle": ("Make My Bortle Better", "Darker skies, one click away!\n\nComing soon... Not! \N{CITYSCAPE AT DUSK}"),
+    }
+
+    def show_joke(self, key):
+        """Just for fun: a light-hearted 'Coming soon... Not!' for the wishes no app can grant."""
+        title, text = self.JOKES[key]
+        box = QMessageBox(QMessageBox.Information, title, text, QMessageBox.Ok, self)
+        box.setAttribute(Qt.WA_DeleteOnClose)
+        box.open()
+        self._joke_box = box
+        return box
 
     def show_about(self):
         QMessageBox.about(self, f"About {APP_NAME}", (
