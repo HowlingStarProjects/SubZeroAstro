@@ -5129,6 +5129,21 @@ def run(app, out_dir: Path) -> int:
         check(_uf_cut == "2026-11-19 07:00" and _uf_none == "" and _uf_m1 == "moved" and _uf_m2 == "",
               f"Organize Automatically: a run that never finished is named ({_uf_cut!r}), and the schedule is pointed "
               f"at this copy of SubZeroAstro once it has moved ({_uf_m1!r}, then {_uf_m2!r})")
+        # Help › Put SubZeroAstro on My Desktop: a shortcut to this copy (nothing is made on the test computer)
+        import shortcuts as _sc
+        _sc_keep = w.settings.value(_sc.K_TARGET)
+        w.settings.remove(_sc.K_TARGET)
+        _sc_none = _sc.keep_current(w.settings)
+        if _sc_keep is not None:
+            w.settings.setValue(_sc.K_TARGET, _sc_keep)
+        _sc_t = _sc.app_target()
+        _sc_hm = next((x.menu() for x in w.menuBar().actions() if x.text().replace("&", "") == "Help"), None)
+        _sc_menu = [a.text() for a in _sc_hm.actions()] if _sc_hm else []
+        check(any("Put SubZeroAstro on My Desktop" in _t for _t in _sc_menu) and _sc_none == ""
+              and "GetFolderPath('Desktop')" in _sc.windows_ps("x") and "SZA_TARGET" in _sc.windows_ps("x")
+              and "make alias file" in _sc.mac_osa()
+              and (_sc_t is None or _sc_t.name.endswith((".exe", ".app")) or sys.platform not in ("win32", "darwin")),
+              f"Help › Put SubZeroAstro on My Desktop: a shortcut to this copy ({_sc_t})")
         # Automatic jobs from one computer only: the computer that turns them on is named in a marker in the library;
         # another computer is asked before it takes over, and a computer that was taken over steps aside
         import one_computer as _oc
