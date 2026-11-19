@@ -21,6 +21,37 @@ from pathlib import Path
 
 SETTLE_S = 120                       # a sub changed in the last 2 minutes may still be being written
 GUESS_SHARES = ("EMMC Images", "Udisk Images", "TF Images", "SD Images")
+STALL_S = 90                         # no data at all from the ASIAIR for this long: it has stopped answering
+CHUNK = 1 << 20                      # copied a megabyte at a time, so the status can say how far it has got
+SAY_EVERY_S = 2.0                    # how often a long copy or look-through says where it is
+_open = open                         # (the self-test swaps in a slow file to try out "stopped answering")
+
+
+class Stalled(OSError):
+    """The ASIAIR stopped sending in the middle of a sub (its Wi-Fi dropped, it was switched off or it hung)."""
+
+
+class _Stopped(Exception):
+    """Stop was pressed in the middle of a sub."""
+
+
+def size_text(b) -> str:
+    """1234567890 -> '1.2 GB'; 52000000 -> '52 MB'."""
+    b = max(0, float(b or 0))
+    if b >= 1e9:
+        return f"{b / 1e9:.1f} GB"
+    if b >= 1e6:
+        return f"{b / 1e6:.0f} MB"
+    return f"{b / 1e3:.0f} KB"
+
+
+def time_text(s) -> str:
+    """Seconds -> 'under a minute', 'about 12 min', 'about 1 h 20 min'."""
+    s = max(0, float(s or 0))
+    if s < 60:
+        return "under a minute"
+    m = int(round(s / 60))
+    return f"about {m} min" if m < 60 else f"about {m // 60} h {m % 60:02d} min"
 
 
 def _exts():
@@ -91,29 +122,51 @@ def shares(address) -> list:
     return found
 
 
-def scan(roots, now=None, stop=None) -> list:
+def scan(roots, now=None, stop=None, progress=None) -> list:
     """[(file, share root, relative path, size, mtime)] for the subs on the ASIAIR (FITS / XISF, not the .jpgs);
-    a sub written in the last couple of minutes is left for next time."""
+    a sub written in the last couple of minutes is left for next time. Each file's size and date come with the
+    folder listing (one trip over the Wi-Fi per folder, not one more per sub - an ASIAIR holding months of subs
+    took the best part of an hour to look through). progress(files looked at so far) every couple of seconds."""
     now = time.time() if now is None else now
     exts = _exts()
     out = []
+    looked, said = 0, time.time()
     for root in roots:
         root = Path(root)
-        for dp, dns, fns in os.walk(root):
+        stack = [root]
+        while stack:
             if stop and stop():
                 return out
-            dns[:] = sorted(d for d in dns if not d.startswith((".", "$")))
-            for n in sorted(fns):
-                p = Path(dp) / n
-                if p.suffix.lower() not in exts:
+            d = stack.pop()
+            try:
+                with os.scandir(d) as it:
+                    ents = sorted(it, key=lambda e: e.name)
+            except OSError:
+                continue
+            subdirs = []
+            for e in ents:
+                try:
+                    if e.is_dir(follow_symlinks=False):
+                        if not e.name.startswith((".", "$")):
+                            subdirs.append(Path(e.path))
+                        continue
+                except OSError:
+                    continue
+                looked += 1
+                if os.path.splitext(e.name)[1].lower() not in exts:
                     continue
                 try:
-                    st = p.stat()
+                    st = e.stat()
                 except OSError:
                     continue
                 if now - st.st_mtime < SETTLE_S:
                     continue
+                p = Path(e.path)
                 out.append((p, root, p.relative_to(root).as_posix(), st.st_size, st.st_mtime))
+            stack.extend(reversed(subdirs))
+            if progress and time.time() - said >= SAY_EVERY_S:
+                said = time.time()
+                progress(looked)
     return out
 
 
@@ -181,50 +234,156 @@ def _wait_if_paused(pause, stop):
         time.sleep(0.4)
 
 
-def fetch(unit: dict, incoming, progress=None, stop=None, free=False, now=None, roots=None, pause=None) -> dict:
+def _copy(src, dst, on_bytes=None, stop=None, stall_s=None):
+    """Copy one sub a megabyte at a time, telling on_bytes(bytes so far) as it goes. If the ASIAIR sends nothing
+    for stall_s seconds, give up on it (Stalled) instead of waiting - a copy from an ASIAIR whose Wi-Fi dropped
+    could otherwise sit there for an hour or more, and the whole morning run with it."""
+    import threading
+    stall_s = STALL_S if stall_s is None else stall_s
+    st = {"done": 0, "err": None, "fin": False, "t": time.time(), "quit": False}
+
+    def run():
+        try:
+            with _open(src, "rb") as fi, open(dst, "wb") as fo:
+                while not st["quit"]:
+                    b = fi.read(CHUNK)
+                    if not b or st["quit"]:          # given up on while it waited: write nothing more
+                        break
+                    fo.write(b)
+                    st["done"] += len(b)
+                    st["t"] = time.time()
+            if not st["quit"]:
+                try:
+                    shutil.copystat(src, dst)
+                except OSError:
+                    try:
+                        m = os.stat(src).st_mtime
+                        os.utime(dst, (m, m))
+                    except OSError:
+                        pass
+        except BaseException as e:  # noqa: BLE001 - handed to the caller below
+            st["err"] = e
+        finally:
+            st["fin"] = True
+        if st["quit"]:                               # left behind after a stall: tidy up the part-copy
+            try:
+                Path(dst).unlink()
+            except OSError:
+                pass
+    th = threading.Thread(target=run, daemon=True, name="asiair-copy")
+    th.start()
+    while True:
+        th.join(0.25)
+        if st["fin"]:
+            break
+        if on_bytes:
+            on_bytes(st["done"])
+        if stop and stop():
+            st["quit"] = True
+            th.join(2)
+            raise _Stopped()
+        if time.time() - st["t"] > stall_s:
+            st["quit"] = True                      # the reader may never come back; it is left behind
+            raise Stalled(f"no data for {int(stall_s)} s")
+    if st["err"] is not None:
+        raise st["err"]
+    if on_bytes:
+        on_bytes(st["done"])
+
+
+def fetch(unit: dict, incoming, progress=None, stop=None, free=False, now=None, roots=None, pause=None,
+          deadline=None, stall_s=None) -> dict:
     """Copy one ASIAIR's new subs into incoming/<rig>/<share>/…  unit = {name, address, rig}.
-    Returns {name, copied, already, failed: [(file, why)], deleted, bytes, error}."""
+    progress(text, i, n): text is '<name>: <what it is doing, in plain words>'.
+    deadline (a time.time()): no new sub is started after it - the rest come over next time.
+    Returns {name, address, copied, already, new, failed: [(file, why)], deleted, bytes, error, stalled, left,
+    timeup}."""
     name = safe_name(unit.get("name") or unit.get("address"))
-    rep = {"name": name, "copied": 0, "already": 0, "failed": [], "deleted": 0, "jpgs": 0, "bytes": 0, "error": ""}
-    roots = shares(unit.get("address")) if roots is None else roots
+    rep = {"name": name, "address": str(unit.get("address") or ""), "copied": 0, "already": 0, "new": 0,
+           "failed": [], "deleted": 0, "jpgs": 0, "bytes": 0, "error": "", "stalled": "", "left": 0,
+           "timeup": False}
+
+    def say(phrase, i=0, n=0):
+        if progress:
+            progress(f"{name}: {phrase}", i, n)
+    if roots is None:
+        say("connecting…")
+        roots = shares(unit.get("address"))
     if not roots:
         rep["error"] = (f"can't reach {unit.get('address') or '(no address)'} - is the ASIAIR on and on the same "
                         "network? (Its IP is in the ASIAIR app's Wi-Fi settings.)")
         return rep
     dest_top = Path(incoming) / safe_name(unit.get("rig") or name)
     seen = load_manifest(name)
-    if progress:
-        progress(f"{name}: looking for new subs…", 0, 0)
-    subs = scan(roots, now=now, stop=stop)
+    say("looking through its folders for new subs…")
+    subs = scan(roots, now=now, stop=stop,
+                progress=lambda k: say(f"looking through its folders for new subs - {k:,} files so far"))
     todo = [s for s in subs if not _seen(seen, s[1], s[2], s[3], s[0])]
     rep["already"] = len(subs) - len(todo)
+    rep["new"] = len(todo)
     if free:                                     # fetched (and checked) on an earlier run: free them now
-        for p, root, rel, size, mt in subs:
-            if _seen(seen, root, rel, size, p):
-                try:
-                    p.unlink()
-                    rep["deleted"] += 1
-                    rep["jpgs"] += _drop_previews(p)
-                except OSError:
-                    pass
+        olds = [s for s in subs if _seen(seen, s[1], s[2], s[3], s[0])]
+        for k, (p, root, rel, size, mt) in enumerate(olds):
+            if stop and stop():
+                break
+            if k % 25 == 0:
+                say(f"freeing space - deleting subs fetched before ({k:,} of {len(olds):,})")
+            try:
+                p.unlink()
+                rep["deleted"] += 1
+                rep["jpgs"] += _drop_previews(p)
+            except OSError:
+                pass
+    total = sum(s[3] for s in todo)
+    done_b = 0                                   # of the new subs, bytes copied or found already there
+    sent_b, t0 = 0, None                         # bytes really sent over the Wi-Fi this run, for the speed
+    last_say = [0.0]
     for i, (p, root, rel, size, mt) in enumerate(todo):
         _wait_if_paused(pause, stop)
         if stop and stop():
             break
-        if progress:
-            progress(f"{name}: {p.name}", i, len(todo))
+        if deadline is not None and time.time() > deadline:
+            rep["timeup"] = True
+            rep["left"] = len(todo) - i
+            break
+        head = f"copying {i + 1} of {len(todo)}"
+
+        def where(b, _head=head):
+            got = sent_b + b
+            t = f"{_head} - {size_text(total - done_b - b)} left"
+            secs = time.time() - t0 if t0 else 0
+            if secs > 5 and got > 0:
+                speed = got / secs
+                t += f", {time_text((total - done_b - b) / speed)} at {speed / 1e6:.1f} MB/s"
+            elif secs > 20:
+                t += " - nothing has come over yet; the ASIAIR is very slow to answer"
+            return t
+
+        def on_bytes(b, _i=i):
+            if time.time() - last_say[0] < SAY_EVERY_S:
+                return
+            last_say[0] = time.time()
+            say(where(b), _i, len(todo))
+        last_say[0] = time.time()
+        say(where(0), i, len(todo))
         dst = dest_top / _tail(p)
+        tmp = dst.with_name(dst.name + ".fetching")
         try:
             dst.parent.mkdir(parents=True, exist_ok=True)
             if not (dst.exists() and dst.stat().st_size == size):
-                tmp = dst.with_name(dst.name + ".fetching")
-                shutil.copy2(p, tmp)
+                if t0 is None:
+                    t0 = time.time()
+                try:
+                    _copy(p, tmp, on_bytes=on_bytes, stop=stop, stall_s=stall_s)
+                finally:
+                    sent_b += size
                 if tmp.stat().st_size != size:
                     tmp.unlink()
                     raise OSError("the copy came out a different size")
                 tmp.replace(dst)
                 rep["copied"] += 1
                 rep["bytes"] += size
+            done_b += size
             seen[_mkey(root, rel, size, p)] = mt
             if free:
                 try:
@@ -233,7 +392,17 @@ def fetch(unit: dict, incoming, progress=None, stop=None, free=False, now=None, 
                     rep["jpgs"] += _drop_previews(p)
                 except OSError as e:
                     rep["failed"].append((rel, f"copied, but couldn't delete it from the ASIAIR: {e}"))
+        except _Stopped:
+            _quiet_unlink(tmp)
+            break
+        except Stalled:
+            _quiet_unlink(tmp)
+            rep["stalled"] = (f"it stopped answering partway through ({rep['copied']} of {len(todo)} new subs "
+                              f"copied) - the rest come over next time")
+            rep["left"] = len(todo) - i
+            break
         except Exception as e:  # noqa: BLE001
+            _quiet_unlink(tmp)
             rep["failed"].append((rel, str(e)))
         if i % 25 == 0:
             save_manifest(name, seen)
@@ -241,36 +410,85 @@ def fetch(unit: dict, incoming, progress=None, stop=None, free=False, now=None, 
     return rep
 
 
-def fetch_all(units, incoming, progress=None, stop=None, free=False, together=True, pause=None) -> list:
+def _quiet_unlink(p):
+    try:
+        Path(p).unlink()
+    except OSError:
+        pass
+
+
+def short_text(rep) -> str:
+    """One ASIAIR's result in a few plain words, for the status line while the others are still going."""
+    if rep.get("error"):
+        return f"can't reach {rep.get('address') or 'it'}"
+    n, c = rep.get("new", 0), rep.get("copied", 0)
+    if rep.get("stalled"):
+        t = f"stopped answering - {c} of {n} copied, the rest next time"
+    elif rep.get("timeup"):
+        t = f"{c} of {n} copied, the other {rep.get('left', 0)} next time (time was up)"
+    elif c:
+        t = f"done - {c} new sub{'s' if c != 1 else ''} ({size_text(rep.get('bytes', 0))})"
+    elif n and rep.get("failed"):
+        return f"couldn't copy its {n} new sub{'s' if n != 1 else ''} ({rep['failed'][0][1]})"
+    elif n:
+        t = "done - its new subs were already in the incoming folder"
+    else:
+        t = "nothing new"
+    if rep.get("failed"):
+        t += f", {len(rep['failed'])} couldn't be copied"
+    return t
+
+
+def fetch_all(units, incoming, progress=None, stop=None, free=False, together=True, pause=None,
+              deadline=None, stall_s=None) -> list:
     """Every ASIAIR's new subs. together: all of them at the same time - each ASIAIR has its own Wi-Fi radio,
-    and that radio (not the network) is what's slow, so four ASIAIRs come over in about the time of one."""
+    and that radio (not the network) is what's slow, so four ASIAIRs come over in about the time of one.
+    The progress line names every ASIAIR with what it is doing - looking, copying (how much is left and how long
+    it should take), nothing new, can't reach - including the ones that have finished."""
     units = [u for u in units if u.get("address")]
     if not together or len(units) < 2:
-        return [fetch(u, incoming, progress, stop, free, pause=pause) for u in units]
+        return [fetch(u, incoming, progress, stop, free, pause=pause, deadline=deadline, stall_s=stall_s)
+                for u in units]
     import threading
     from concurrent.futures import ThreadPoolExecutor
     lock = threading.Lock()
-    state = {}
-
-    def prog_for(name):
-        def p(text, i, n):
-            if progress is None:
-                return
-            with lock:
-                state[name] = (i, n)
-                done = sum(a for a, _b in state.values())
-                total = sum(b for _a, b in state.values())
-                progress(f"Fetching from {len(units)} ASIAIRs at once - " + ", ".join(
-                    f"{k}: {a}/{b}" for k, (a, b) in state.items()), done, total)
-        return p
     # rows of the same ASIAIR (same name - e.g. its Plan and Autorun folders as two rows) go one after the other:
     # they share its radio and its record of what's been fetched
     groups = {}
     for u in units:
         groups.setdefault(safe_name(u.get("name") or u.get("address")), []).append(u)
+    state = {n: ("waiting…", 0, 0) for n in groups}
+    finished = set()
+
+    def show():
+        if progress is None:
+            return
+        busy = len(groups) - len(finished)
+        head = (f"Fetching from your {len(groups)} ASIAIRs ({busy} still going)" if busy else
+                f"Fetched from your {len(groups)} ASIAIRs")
+        progress(head + " - " + "; ".join(f"{k}: {t}" for k, (t, _a, _b) in state.items()),
+                 sum(a for _t, a, _b in state.values()), sum(b for _t, _a, b in state.values()))
+
+    def prog_for(name):
+        def p(text, i, n):
+            with lock:
+                state[name] = (text.split(": ", 1)[1] if text.startswith(name + ": ") else text, i, n)
+                show()
+        return p
 
     def run_group(name, us):
-        return [fetch(u, incoming, prog_for(name), stop, free, pause=pause) for u in us]
+        reps = [fetch(u, incoming, prog_for(name), stop, free, pause=pause, deadline=deadline, stall_s=stall_s)
+                for u in us]
+        with lock:
+            ok = [r for r in reps if not r["error"]] or reps
+            words = "; ".join(short_text(r) for r in ok)
+            n = sum(r.get("new", 0) for r in reps)
+            state[name] = (words, n, n)
+            finished.add(name)
+            show()
+        return reps
+    with lock:
+        show()
     with ThreadPoolExecutor(max_workers=min(8, len(groups))) as pool:
         futs = [pool.submit(run_group, n, us) for n, us in groups.items()]
         return [r for f in futs for r in f.result()]
@@ -287,6 +505,10 @@ def describe(reps) -> str:
             t += f", {r['deleted']} freed on the ASIAIR" + (f" (+{r['jpgs']} .jpg)" if r.get("jpgs") else "")
         if r["failed"]:
             t += f", {len(r['failed'])} failed ({r['failed'][0][1]})"
+        if r.get("stalled"):
+            t += f" - {r['stalled']}"
+        elif r.get("timeup"):
+            t += f" - time was up, the other {r.get('left', 0)} come over next time"
         out.append(t)
     return "\n".join(out) if out else "No ASIAIRs set up."
 
@@ -335,7 +557,12 @@ def save_units(settings, units):
 
 def last_text(rep, stamp) -> str:
     """What the Last fetch column shows for one ASIAIR after a fetch round."""
-    return f"{stamp}: not reached" if rep.get("error") else f"{stamp}: {rep.get('copied', 0)} new"
+    if rep.get("error"):
+        return f"{stamp}: not reached"
+    t = f"{stamp}: {rep.get('copied', 0)} new"
+    if rep.get("stalled") or rep.get("timeup"):
+        t += f", {rep.get('left', 0)} left for next time"
+    return t
 
 
 def record_last(settings, reps, stamp=None) -> list:

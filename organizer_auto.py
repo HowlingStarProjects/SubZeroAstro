@@ -27,6 +27,7 @@ TASK_NAME = "SubZeroAstro Auto-Organize"
 MAC_LABEL = "io.github.bapoteet.subzeroastro.autoorganize"
 SETTLE_MIN = 60            # a file changed in the last hour may still be arriving: it waits for the next run
 LOCK_STALE_H = 12
+AUTO_FETCH_MIN = 60       # Organize Automatically starts no new ASIAIR sub after this long; the rest come next time
 STATUS_EVERY_S = 3         # a running run says where it is at most this often (the windows look every few seconds)
 STATUS_QUIET_MIN = 60      # a run on another computer that hasn't said anything for this long has stopped
 FREQS = {"daily": "Every day", "twice": "Twice a week (Monday and Thursday)", "weekly": "Once a week (Sunday)"}
@@ -153,8 +154,11 @@ def run(cfg=None, settings=None, progress=None, now=None) -> dict:
                 inc = (s.value("asiair/incoming", "") or "").strip() or str(src)
                 if units:
                     progress(f"Fetching new subs from your {len(units)} ASIAIR(s)", force=True)
+                    # an hour at most, then on to organizing: a slow or stuck ASIAIR's other subs come over
+                    # next time instead of holding up the whole morning run
                     reps = A.fetch_all(units, inc, free=s.value("asiair/free", False, type=bool),
-                                       progress=lambda t, i, n: progress(t))
+                                       progress=lambda t, i, n: progress(t),
+                                       deadline=time.time() + AUTO_FETCH_MIN * 60)
                     rep["asiair"] = A.describe(reps).replace("\n", "; ")
                     rep["asiair_lines"] = A.describe(reps).splitlines()
                     try:

@@ -5652,6 +5652,61 @@ def run(app, out_dir: Path) -> int:
               f"Fetch From My ASIAIRs: the new subs copied into the rig's folder ({_as_files}), never twice "
               f"({_as_r2[0]['copied'] if _as_r2 else None} the second time), .jpgs left; freeing space deletes only "
               f"fetched subs ({_as_left})")
+        # the fetch's status names every ASIAIR and what it is doing (an ASIAIR that can't be reached or has
+        # nothing new no longer sits at "0/0"); one that stops answering partway is given up on, not waited on
+        # for an hour; a time limit leaves the rest for next time
+        _asx_root = _au_root / "asiair_stall" / "EMMC Images" / "Autorun"
+        _asx_root.mkdir(parents=True, exist_ok=True)
+        for _asx_k in range(3):
+            (_asx_root / f"Light_S_{_asx_k}.fit").write_bytes(b"s" * 3000)
+            os.utime(_asx_root / f"Light_S_{_asx_k}.fit", (_as_old, _as_old))
+        _asx_lines = []
+        _asx_units = [{"name": f"StallAir {time.time()}", "address": str(_asx_root.parent), "rig": "X"},
+                      {"name": "GoneAir", "address": str(_au_root / "no_such_air"), "rig": "Y"}]
+
+        class _AsxSlow:
+            def __init__(self, *a):
+                self.f, self.n = open(*a), 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                self.f.close()
+
+            def read(self, k):
+                self.n += 1
+                if self.n > 1:
+                    time.sleep(3)
+                return self.f.read(k)
+        _asx_saved = (_as._open, _as.CHUNK)
+        _as._open, _as.CHUNK = _AsxSlow, 1000
+        _asx_t = time.time()
+        try:
+            _asx_reps = _as.fetch_all(_asx_units, _au_root / "stall_inc", stall_s=1.0,
+                                      progress=lambda t, i, n: _asx_lines.append(t))
+        finally:
+            _as._open, _as.CHUNK = _asx_saved
+        _asx_secs = time.time() - _asx_t
+        for _asx_th in __import__("threading").enumerate():      # the copy given up on tidies up after itself
+            if _asx_th.name == "asiair-copy":
+                _asx_th.join(8)
+        _asx_fin = _asx_lines[-1] if _asx_lines else ""
+        _asx_r = _asx_reps[0] if _asx_reps else {}
+        _asx_tmp = list((_au_root / "stall_inc").rglob("*.fetching"))
+        _asx_tu = _as.fetch(_asx_units[0], _au_root / "stall_inc", deadline=time.time() - 1)
+        _asx_ok = _as.fetch(_asx_units[0], _au_root / "stall_inc")
+        check(_asx_secs < 10 and _asx_r.get("stalled") and _asx_r.get("left") == 3 and not _asx_tmp
+              and "GoneAir: can't reach" in _asx_fin and "stopped answering" in _asx_fin
+              and any("waiting" in t and "GoneAir" in t for t in _asx_lines[:1])
+              and "left for next time" in _as.last_text(_asx_r, "X")
+              and _asx_tu.get("timeup") and _asx_tu.get("left") == 3 and _asx_tu.get("copied") == 0
+              and _asx_ok.get("copied") == 3 and "done - 3 new subs" in _as.short_text(_asx_ok)
+              and _as.short_text({"name": "a", "new": 0, "copied": 0, "error": "", "failed": []}) == "nothing new"
+              and _as.size_text(2.7e9) == "2.7 GB" and _as.time_text(800) == "about 13 min",
+              f"Fetch From My ASIAIRs: the status names every ASIAIR and what it is doing ({_asx_fin}); one that "
+              f"stops answering is given up on in {_asx_secs:.1f} s with nothing half-copied left; a time limit leaves "
+              f"the rest for next time")
         # Clean Up My N.I.N.A. Computers: a frame is deleted from the rig's computer only when the same file is filed
         # in the organized library; a different file of that name, one not filed yet and recent ones stay
         import nina_cleanup as _nc
