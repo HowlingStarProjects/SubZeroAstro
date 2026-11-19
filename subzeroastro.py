@@ -1556,7 +1556,8 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         # just for fun: two wishes every astrophotographer has
         self.joke_actions = {}
-        for key, text in (("clouds", "Make Clouds Disappear"), ("bortle", "Make My Bortle Better")):
+        for key, text in (("clouds", "Make Clouds Disappear"), ("bortle", "Make My Bortle Better"),
+                          ("prayer", "Weather Prayer")):
             a = QAction(text, self)
             a.triggered.connect(lambda _=False, k=key: self.show_joke(k))
             m.addAction(a)
@@ -3714,6 +3715,11 @@ class MainWindow(QMainWindow):
     JOKES = {
         "clouds": ("Make Clouds Disappear", "Clear skies, on demand!\n\nComing soon... Not! \N{CLOUD}"),
         "bortle": ("Make My Bortle Better", "Darker skies, one click away!\n\nComing soon... Not! \N{CITYSCAPE AT DUSK}"),
+        "prayer": ("Weather Prayer",
+                   "Dear God, I have been really good and my astro equipment is ready to go. Please bless me and "
+                   "all other astrophotographers with clear dark skies, good seeing and minimal moonlight for "
+                   "tonight.  If you could also throw in some anti-Murphy's Law pixie dust and maybe a cold beer, "
+                   "that would be great and would let me know you really care about me.  Amen."),
     }
 
     def show_joke(self, key):
