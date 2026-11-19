@@ -1796,6 +1796,18 @@ def run(app, out_dir: Path) -> int:
             if _jk_box is not None:
                 _jk_box.close()
                 QApplication.processEvents()
+    _jk_pr = getattr(w, "joke_actions", {}).get("prayer")
+    _jk_pr_msg = ""
+    if _jk_pr is not None:
+        _jk_pr.trigger()
+        QApplication.processEvents()
+        _jk_pr_box = getattr(w, "_joke_box", None)
+        _jk_pr_msg = _jk_pr_box.text() if _jk_pr_box is not None else ""
+        if _jk_pr_box is not None:
+            _jk_pr_box.close()
+            QApplication.processEvents()
+    check("Weather Prayer" in _jk_texts and _jk_pr_msg.startswith("Dear God, I have been really good")
+          and _jk_pr_msg.endswith("Amen."), f"Help > Weather Prayer shows the prayer ({_jk_pr_msg[:40]}...)")
     check("Make Clouds Disappear" in _jk_texts and "Make My Bortle Better" in _jk_texts
           and len(_jk_msgs) == 2 and all("Coming soon... Not!" in _jk_t for _jk_t in _jk_msgs),
           f"Help > Make Clouds Disappear / Make My Bortle Better answer 'Coming soon... Not!' ({_jk_msgs})")
