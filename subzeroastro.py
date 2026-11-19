@@ -46,7 +46,7 @@ from chart import ChartPoint, SessionChart, filter_color
 
 APP_NAME = "SubZeroAstro"
 APP_TAGLINE = "From subs to masters - zero hassle."
-APP_VERSION = "0.9.298 beta"
+APP_VERSION = "0.9.299 beta"
 ORGANIZER_ENABLED = True       # File › Organize My Astro Files…
 ui_header.APP_VERSION = APP_VERSION       # shown in small print under the name on every page
 APP_AUTHOR = "Brian A. Poteet, DVM"
@@ -1579,6 +1579,11 @@ class MainWindow(QMainWindow):
         a.setShortcutContext(Qt.WidgetShortcut)    # F1 itself is handled on every page by the banner
         a.setToolTip("Open the SubZeroAstro user manual")
         a.triggered.connect(ui_header.open_manual)
+        m.addAction(a)
+        a = QAction("Put SubZeroAstro on My Desktop" if sys.platform != "darwin" else "Put SubZeroAstro on My Desktop "
+                    "(alias)", self)
+        a.setToolTip("Make a shortcut to this copy of SubZeroAstro on your Desktop (and in the Start menu on Windows)")
+        a.triggered.connect(self.make_desktop_shortcut)
         m.addAction(a)
         a = QAction("Zip My Logs (for a bug report)", self)
         a.setToolTip("Put the logs of every page and a note about this computer in one zip on your Desktop")
@@ -3258,6 +3263,23 @@ class MainWindow(QMainWindow):
             organizer_auto.keep_schedule_current()
         except Exception:  # noqa: BLE001 - a start-up check never stops the app
             pass
+        try:                                         # a desktop shortcut made here: still opening this copy?
+            import shortcuts
+            shortcuts.keep_current(QSettings("FITSBlasterWin", "FITSBlasterWin"))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def make_desktop_shortcut(self):
+        import shortcuts
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            ok, msg = shortcuts.make(self.settings)
+        finally:
+            QApplication.restoreOverrideCursor()
+        box = QMessageBox(QMessageBox.Information if ok else QMessageBox.Warning, "Desktop Shortcut", msg,
+                          QMessageBox.Ok, self)
+        box.setTextFormat(Qt.RichText)
+        box.exec()
 
     def cleanup_checkpoints(self):
         try:
