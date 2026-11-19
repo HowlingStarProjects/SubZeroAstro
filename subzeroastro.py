@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import threading
 import time
 import traceback
 from collections import OrderedDict
@@ -45,7 +46,7 @@ from chart import ChartPoint, SessionChart, filter_color
 
 APP_NAME = "SubZeroAstro"
 APP_TAGLINE = "From subs to masters - zero hassle."
-APP_VERSION = "0.9.297 beta"
+APP_VERSION = "0.9.298 beta"
 ORGANIZER_ENABLED = True       # File › Organize My Astro Files…
 ui_header.APP_VERSION = APP_VERSION       # shown in small print under the name on every page
 APP_AUTHOR = "Brian A. Poteet, DVM"
@@ -985,6 +986,8 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(8000, lambda: self.set_asiair_night(True, int(self.settings.value("asiair/every", 10)
                                                                               or 10)))
         QTimer.singleShot(3000, self.cleanup_checkpoints)
+        if "--selftest" not in sys.argv:             # automatic organizing: still starting this copy of the app?
+            QTimer.singleShot(6000, lambda: threading.Thread(target=self._keep_schedule, daemon=True).start())
         self.profile_timer = QTimer(self)                      # My Profile: in step with the other computers
         self.profile_timer.setInterval(self.profile_syncer.EVERY_S * 1000)
         self.profile_timer.timeout.connect(lambda: self.profile_syncer.start(force=True))
@@ -3247,6 +3250,14 @@ class MainWindow(QMainWindow):
             self.show_combo.setCurrentText("Flagged")
             self.statusBar().showMessage(f"Flagged {len(uids)} frames — step through them and press X "
                                          "to reject, or Shift+X to reject them all", 8000)
+
+    @staticmethod
+    def _keep_schedule():
+        try:
+            import organizer_auto
+            organizer_auto.keep_schedule_current()
+        except Exception:  # noqa: BLE001 - a start-up check never stops the app
+            pass
 
     def cleanup_checkpoints(self):
         try:

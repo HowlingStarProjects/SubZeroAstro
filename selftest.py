@@ -5101,6 +5101,34 @@ def run(app, out_dir: Path) -> int:
         check(_au_l1 and not _au_l2,
               f"Organize Automatically: a run left behind by SubZeroAstro being closed (or the computer switched "
               f"off) no longer blocks the next run ({_au_l1}, {_au_l2})")
+        # A run stopped part way (closed / updated) is named, not hidden behind an old "Last automatic run"; and the
+        # schedule follows the app when a new copy is unzipped somewhere else
+        _uf_keys = ("auto_org/now", "auto_org/last", "auto_org/last_time", "auto_org/exe", "auto_org/on")
+        _uf_keep = {_k: w.settings.value(_k) for _k in _uf_keys}
+        w.settings.setValue("auto_org/last", "2026-11-16 07:00: 12 file(s) filed")
+        w.settings.remove("auto_org/last_time")
+        import json as _ufj
+        w.settings.setValue("auto_org/now", _ufj.dumps({"started": "2026-11-19 07:00", "t0": time.time() - 600,
+                                                        "at": time.time() - 60, "pid": 999999,
+                                                        "host": _au._host()}))
+        _uf_cut = _au.unfinished(w.settings)
+        w.settings.setValue("auto_org/last_time", "2026-11-19 08:10")
+        _uf_none = _au.unfinished(w.settings)
+        _uf_calls, _uf_sched = [], _au.schedule
+        _au.schedule = lambda c: (_uf_calls.append(c) or (True, "ok"))
+        w.settings.setValue("auto_org/on", True)
+        w.settings.setValue("auto_org/exe", "C:/old copy/SubZeroAstro.exe --auto-organize")
+        _uf_m1 = _au.keep_schedule_current(w.settings) if sys.platform in ("win32", "darwin") else "moved"
+        _uf_m2 = _au.keep_schedule_current(w.settings)
+        _au.schedule = _uf_sched
+        for _k, _v in _uf_keep.items():
+            if _v is None:
+                w.settings.remove(_k)
+            else:
+                w.settings.setValue(_k, _v)
+        check(_uf_cut == "2026-11-19 07:00" and _uf_none == "" and _uf_m1 == "moved" and _uf_m2 == "",
+              f"Organize Automatically: a run that never finished is named ({_uf_cut!r}), and the schedule is pointed "
+              f"at this copy of SubZeroAstro once it has moved ({_uf_m1!r}, then {_uf_m2!r})")
         # Automatic jobs from one computer only: the computer that turns them on is named in a marker in the library;
         # another computer is asked before it takes over, and a computer that was taken over steps aside
         import one_computer as _oc
@@ -6142,6 +6170,8 @@ def run(app, out_dir: Path) -> int:
         (_ur_dir / "NGC 281_0002.fits").write_bytes(b"\xff\xd8\xff\xe0" + b"\x01" * 4000)
         _ur_left = _au_root / "unreadable_left.fits"           # FITS-sized, leftover disk data inside
         _ur_left.write_bytes(bytes((7 * _k) % 251 + 1 for _k in range(2880 * 3)))
+        _ur_temp = _au_root / "temp_NGC 281_0003.fits"           # a copying program's unfinished file
+        _ur_temp.write_bytes(bytes((5 * _k) % 241 + 1 for _k in range(2880 * 3)))
         _ur_items = _og.classify(sorted(_ur_dir.glob("*.fits")), library=_au_root / "unreadable_lib",
                                  root=_ur_dir.parent)
         _ur_keep = (_owin.items, getattr(_owin, "_plan_args", None))
@@ -6155,6 +6185,7 @@ def run(app, out_dir: Path) -> int:
         check(all(i.status == "error" for i in _ur_items)
               and "plain text, not a picture" in _ur_items[0].why and ".jpg picture" in _ur_items[1].why
               and "never written into it" in _og.what_it_is(_ur_left)
+              and "unfinished copy" in _og.what_it_is(_ur_temp)
               and "2 in" in _ur_note and "SQA55" in _ur_note and "right-click" in _ur_note
               and str(_ur_dir / "NGC 281_0001.fits") in _ur_copy and "plain text" in _ur_copy
               and _ur_all.count("\n") == 1 and _ur_clip == _ur_all,

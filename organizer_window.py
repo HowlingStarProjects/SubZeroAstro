@@ -441,8 +441,13 @@ class OrganizeDialog(QDialog):
         now = A.running_status(self.settings)
         if now:
             t += f"<br><b style='color:#e0b040'>{html.escape(A.describe_running(now))}</b>"
+        cut = "" if now else A.unfinished(self.settings)
+        if cut:
+            t += (f"<br><b style='color:#e0b040'>The run that started {html.escape(cut)} didn't finish - "
+                  f"SubZeroAstro was closed or updated, or the computer was switched off, while it ran. The next "
+                  f"run carries on with whatever is still in the incoming folder.</b>")
         if last:
-            t += f"<br><i>Last automatic run: {last}</i>"
+            t += f"<br><i>Last {'finished ' if cut else ''}automatic run: {last}</i>"
         if cfg["on"]:                                # green for go: it's on, at a glance
             t = f"<span style='color:#46c85f'>{t}</span>"
         if t != self.auto_note.text():
@@ -1701,6 +1706,8 @@ class AutoDialog(QDialog):
                               f"{other.get('computer') or 'the other computer'} - run them from one computer only.")
             return
         ok, msg = self.A.schedule(cfg)
+        if ok:
+            self.settings.setValue("auto_org/exe", self.A.command_text())
         cfg["on"] = ok
         old = (self.settings.value("auto_org/dst", "") or "").strip()
         self.A.save_config(cfg, self.settings)
