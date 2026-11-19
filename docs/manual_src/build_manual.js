@@ -466,6 +466,27 @@ p("The telescope (rig) name is taken from the folder name (*RedCat51Calis* → *
 p("Every master is checked as it is built. You are warned when a dark or bias is **uneven like a picture** (light leaked in), a dark is **far brighter than the bias** (light, or the camera not cooled), a bias is **practically zero** (saved on a 0..1 scale or with a pedestal taken off), or flats are **over-exposed** (clipped) or **very dim**. A warned master is still saved, so you can compare - but better to retake that set.");
 tip("Darks: cap the telescope (or take the camera off) and cover it, at night or in a dark room, with the filter wheel on a filter - not an empty slot. Match the lights' exposure, gain, offset and temperature.", "Taking good darks");
 
+sec("7.7", "Mosaics: several panels, one picture", ["Mosaic", "Stitch a Mosaic", "Panels", "Overlap", "ASIAIR mosaic", "N.I.N.A. mosaic", "Framing Assistant panels"]);
+p("Some targets are bigger than your camera's view - the Andromeda Galaxy or the Veil Nebula with a longer telescope, for example (the Target Picker says *Needs a mosaic*). Then you photograph the target in pieces, called **panels**, like tiles, and join them afterwards. Neighbouring panels **overlap** a little, so they share stars to line them up by.");
+sub("Your first mosaic, step by step");
+steps([
+  "**Plan it.** Decide how many panels (start with two side by side) and let them overlap by **15-20%**. In **N.I.N.A.**, open the *Framing Assistant*, set *Horizontal / Vertical panels* and *Overlap*, and add the panels to your sequence - each panel becomes its own target (*M31 Panel 1*, *M31 Panel 2*…). On an **ASIAIR**, the mosaic option when you frame a target adds each panel to your Plan as its own target.",
+  "**Shoot it.** Give every panel the same filters and roughly the same total exposure, so they match in depth. All panels in one night, or one panel per night - both work. Take flats as usual: each panel is calibrated like any other target.",
+  "**Stack it.** On page 2 each panel is its own group (*M31 Panel 1 · Ha …*). Stack them all in one run. If your sequencer saved every panel under the same target name, SubZeroAstro still keeps them apart by where the telescope was pointing, and names them *M31-Panel1*, *M31-Panel2*… (top left first).",
+  "**Stitch it.** When the masters are panels of a mosaic, SubZeroAstro offers **Stitch the Mosaic…** as soon as the stacking ends - or choose **Stack › Stitch a Mosaic…** on page 1 at any time. Add the panel masters (**Add Panel Masters…** or **Add a Folder…** - all filters at once) and click **Stitch the Mosaic**.",
+  "**Carry on.** **Open in Astro Image Processing ▶** takes the joined masters to page 3: crop, gradient removal and the XTerminators work on the whole mosaic, then Finishing Touches as usual.",
+]);
+sub("What the stitcher does");
+bullets([
+  "**Where each panel sits.** Panels that are plate solved (their header knows exactly where they point) are placed by that. Panels that aren't are plate solved with **ASTAP** first. Without ASTAP, a panel is placed by the stars it shares with a panel already placed - which needs a good overlap.",
+  "**Stars that line up.** The stars in every overlap then fine-tune the placing, so the joins show no doubled stars. The log says how well they agree (a few tenths of a pixel is normal).",
+  "**Brightness evened out.** The sky glow differs from panel to panel and night to night, and a thin cloud dims a panel. From the stars both panels show and the sky in the overlap, each panel gets a brightness factor and a gentle sky correction so that it matches its neighbours - the deepest panel keeps its own levels. The log shows the brightness difference in the overlaps before and after.",
+  "**Soft joins.** Each panel fades out over its last few percent, so where two panels overlap you get a smooth blend, and the overlap areas are a little less noisy than the rest.",
+  "**One master per filter**, all on the same canvas, plate solved, in a new *<target>_Mosaic* folder next to the panels' folders - for example *M31_Ha_Mosaic4_Master.fits*. The outline of a mosaic is never quite a rectangle; the largest rectangle that is covered everywhere is stored as its **auto-crop**, which page 3 offers.",
+]);
+tip("Overlap generously (20%), and keep the camera angle the same for every panel - N.I.N.A.'s Framing Assistant and the ASIAIR do both. A mosaic is big: four panels from a 26-megapixel camera make a picture of roughly 90 megapixels, which needs several GB of memory to stitch.", "For a smooth mosaic");
+warn("Gradients: the stitcher only matches the panels to each other. A panel with a strong light-pollution gradient passes it on to the mosaic - remove gradients on page 3 afterwards, on the whole mosaic at once.");
+
 ch(8, "Page 3 – Astro Image Processing");
 img("12_prepare_done.png", "Page 3 after processing: masters (left), preview with crop box, step history, and the step settings (right)");
 sec("8.1", "Masters and target sets", ["Target sets", "Will be lined up", "Add Masters"]);
@@ -1004,6 +1025,7 @@ const HIGHLIGHTS = [
     ["Automatic calibration matching", "Bias, darks and flats picked by camera, gain, offset, temperature, exposure, filter, rig and nearest date, with ✓ ⚠ ✗ and a plain reason", "0.4.0"],
     ["SkyFlats (Mote Buster)", "No flats? A flat is built from your own light frames; a poor one stops and asks before it is used", "0.9.22"],
     ["Build Calibration Masters", "One folder of mixed bias, dark, flat and dark-flat subs is sorted, checked and turned into masters, no lights needed", "0.9.24"],
+    ["Mosaics", "Stitch a Mosaic joins the stacked panels of a target too big for one frame: placed by plate solving or shared stars, brightness evened out, soft joins, one master per filter; panels saved under one name are kept apart when stacking", "MOSAIC_VERSION"],
     ["Field-distortion correction", "Meridian flips and other setups get a distortion model per frame, so corner stars stay sharp", "0.9.43"],
     ["Hot pixels removed", "Cosmetic correction in every frame: hot pixels and cosmic-ray hits are replaced by their neighbours, so undithered data has no coloured specks", "0.9.54"],
     ["Hot-pixel-proof star matching", "Single-pixel spikes are ignored, so frames with hundreds of hot pixels line up on the sky, not the sensor", "0.9.51"],
