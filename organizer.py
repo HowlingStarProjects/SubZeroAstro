@@ -831,6 +831,21 @@ def _quick_hash(p: Path) -> str:
     return _HASHES[k]
 
 
+def same_capture(a, b, size_b=None) -> bool:
+    """The same frame as captured: same size and fingerprint - also when one of them was squeezed by the Fitz'r
+    Squeezer (a squeezed file remembers its original's size and fingerprint)."""
+    a, b = Path(a), Path(b)
+    sa = a.stat().st_size
+    sb = b.stat().st_size if size_b is None else size_b
+    if sa == sb:
+        return _quick_hash(a) == _quick_hash(b)
+    import squeezer
+    ia, ib = squeezer.original_id(a, sa), squeezer.original_id(b, sb)
+    if ia[0] != ib[0] or (ia[1] is None and ib[1] is None):
+        return False
+    return (ia[1] or _quick_hash(a)) == (ib[1] or _quick_hash(b))
+
+
 def plan(items, library, progress=None, stop=None) -> list:
     """Final destinations: already in place / duplicate of a file already there / a numbered name if a
     different file of that name is in the way (also between files of this same run)."""
@@ -882,13 +897,13 @@ def plan(items, library, progress=None, stop=None) -> list:
         while True:
             key = str(cand).lower()
             if key in taken:
-                if not resort and taken[key] == it.size and _quick_hash(it.src) == _quick_hash(Path(taken[key + "#src"])):
+                if not resort and same_capture(Path(taken[key + "#src"]), it.src, it.size):
                     it.status, it.same_as = "duplicate", Path(taken[key + "#src"])
                     it.why = f"the same file as {it.same_as.name}"
                     break
             elif listing.exists(cand):
                 try:
-                    if not resort and cand.stat().st_size == it.size and _quick_hash(cand) == _quick_hash(it.src):
+                    if not resort and same_capture(cand, it.src, it.size):
                         it.status, it.same_as = "duplicate", cand
                         it.why = f"the same file as the one already in {cand.parent.name}"
                         break
@@ -932,8 +947,10 @@ def same_bytes(a, b, chunk=8 << 20) -> bool:
     from concurrent.futures import ThreadPoolExecutor
     try:
         a, b = Path(a), Path(b)
-        if _same_path(a, b) or a.stat().st_size != b.stat().st_size:
+        if _same_path(a, b):
             return False
+        if a.stat().st_size != b.stat().st_size:
+            return _same_unsqueezed(a, b)
         if _quick_hash(a) != _quick_hash(b):
             return False
         with open(a, "rb") as fa, open(b, "rb") as fb, ThreadPoolExecutor(max_workers=2) as pool:
@@ -945,6 +962,22 @@ def same_bytes(a, b, chunk=8 << 20) -> bool:
                 if not xa:
                     return True
     except OSError:
+        return False
+
+
+def _same_unsqueezed(a: Path, b: Path) -> bool:
+    """Byte for byte the same once a squeezed one is unpacked (the Fitz'r Squeezer keeps every bit)."""
+    if not same_capture(a, b):
+        return False
+    import fits_tiles as ft
+    import squeezer
+
+    def plain(p):
+        buf = p.read_bytes()
+        return ft.expand_file(buf) if squeezer.is_squeezed(p) else buf
+    try:
+        return plain(a) == plain(b)
+    except (OSError, ValueError, MemoryError):
         return False
 
 
@@ -1625,7 +1658,7 @@ def check_leftovers(sources, library, progress=None, stop=None) -> dict:
     out = {k: [] for k in ("safe", "keep", "work", "project", "other")}
     out["folders"] = out["empty_folders"] = 0
     # what is in Organized Astro Files, by size (so only files of the same size are ever compared)
-    by_size = {}
+    by_size, by_name = {}, {}
     if _exists(base):
         for dp, dns, fns in os.walk(base):
             dns[:] = [d for d in dns if d != LOG_DIR]
@@ -1633,6 +1666,7 @@ def check_leftovers(sources, library, progress=None, stop=None) -> dict:
                 p = Path(dp) / f
                 try:
                     by_size.setdefault(p.stat().st_size, []).append(p)
+                    by_name.setdefault(f.lower(), []).append(p)
                 except OSError:
                     pass
             if stop and stop():
@@ -1682,6 +1716,8 @@ def check_leftovers(sources, library, progress=None, stop=None) -> dict:
             continue
         cands = sorted(by_size.get(size, []), key=lambda c: (c.name != name, str(c)))
         twin = next((c for c in cands if same_bytes(p, c)), None)
+        if twin is None:                 # its library copy squeezed by the Fitz'r Squeezer (another size)
+            twin = next((c for c in by_name.get(name.lower(), []) if c not in cands and same_bytes(p, c)), None)
         if twin is not None:
             out["safe"].append((p, f"identical copy in {twin.parent}"))
         else:

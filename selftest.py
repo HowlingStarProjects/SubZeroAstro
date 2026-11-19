@@ -5718,6 +5718,103 @@ def run(app, out_dir: Path) -> int:
               f"Clean Up My N.I.N.A. Computers: only frames filed in the library with the same contents are deleted "
               f"({_nc_r0}; kept {_nc_left}); none while newer than the days kept ({_nc_r5}); emptied night folders go, "
               f"the shared folder stays")
+        # Fitz'r Squeezer: raw subs in ticked folders shrink without losing a bit, still read everywhere in the app
+        # (grading, stacking, header edits), are still the same frames to Organize and the N.I.N.A. clean-up, and
+        # Unsqueeze gives back every original byte for byte; stacks are left alone
+        import squeezer as _sqz
+        import fits_tiles as _sqt
+        import fits_edit as _sqe
+        import organizer as _sqo
+        _sq_root = _au_root / "squeezer"
+        _ncsh.rmtree(_sq_root, ignore_errors=True)
+        _sq_lib = _sq_root / "Library"
+        _sq_dir = _sqo.org_base(_sq_lib) / "Light Frames" / "SQA55" / "NGC 281" / "2026-11-12" / "Ha"
+        _sq_other = _sqo.org_base(_sq_lib) / "Light Frames" / "SQA55" / "M31"
+        for _sqd in (_sq_dir, _sq_other):
+            _sqd.mkdir(parents=True, exist_ok=True)
+        _sq_rng = np.random.default_rng(281)
+        _sq_orig = {}
+        for _sqi in range(3):
+            _sq_img = 800.0 + _sq_rng.poisson(250, (301, 2111)).astype(np.float64)
+            _sq_img[_sq_rng.integers(0, 301, 40), _sq_rng.integers(0, 2111, 40)] = 65535.0     # hot pixels
+            _sq_img[150:160, 1000:1010] += 30000.0                                               # a star
+            _sq_p = _sq_dir / f"Light_NGC281_300.0s_{_sqi:04d}.fits"
+            core.write_fits(_sq_p, _sq_img, {"IMAGETYP": "Light", "OBJECT": "NGC 281", "FILTER": "Ha",
+                                             "BAYERPAT": "RGGB", "EXPTIME": 300.0,
+                                             "DATE-OBS": f"2026-11-12T0{_sqi}:00:00"}, bitpix=16)
+            os.utime(_sq_p, (1.7e9, 1.7e9 + _sqi))
+            _sq_orig[_sq_p.name] = _sq_p.read_bytes()
+        core.write_fits(_sq_dir / "master_Ha.fits", _sq_rng.random((40, 50)), {"IMAGETYP": "Master Light"})
+        core.write_fits(_sq_other / "M31_0001.fits", 900.0 + _sq_rng.poisson(90, (50, 70)), {}, bitpix=16)
+        _sq_p0 = _sq_dir / "Light_NGC281_300.0s_0000.fits"
+        _sq_before = core.analyze_frame(_sq_p0)
+        _sq_pix0 = core.read_fits(_sq_p0)[0]
+        _sq_nina = _sq_root / "EAGLE1"
+        _sq_nina.mkdir()
+        _ncsh.copy2(_sq_p0, _sq_nina / _sq_p0.name)
+        _sq_saved = w.settings.value("auto_org/dst", "")
+        w.settings.setValue("auto_org/dst", str(_sq_lib))
+        _sqw = w.open_squeezer(show=False)
+        _sq_ticked = _sqw.tick(_sq_dir) is not None
+        _sqw.work_out(wait=True)
+        _sq_sv = _sqw.survey_rep or {}
+        _sqw.go(confirm=False, wait=True)
+        _sq_run = _sqw.run_rep or {}
+        _sq_files = sorted(_sq_dir.glob("Light_*.fits"))
+        _sq_all = all(_sqz.is_squeezed(p) for p in _sq_files) and not _sqz.is_squeezed(_sq_dir / "master_Ha.fits") \
+            and not _sqz.is_squeezed(_sq_other / "M31_0001.fits")
+        _sq_small = sum(p.stat().st_size for p in _sq_files) / sum(len(b) for b in _sq_orig.values())
+        _sq_dates = [int(p.stat().st_mtime) for p in _sq_files] == [1700000000, 1700000001, 1700000002]
+        check(_sq_ticked and len(_sq_sv.get("todo", [])) == 3 and sum(_sq_sv.get("skipped", {}).values()) == 1
+              and _sq_sv.get("after_bytes", 1e18) < _sq_sv.get("todo_bytes", 0) and _sq_run.get("done") == 3
+              and _sq_all and _sq_small < 0.6 and _sq_dates and not list(_sq_dir.glob("*.squeezing")),
+              f"Fitz'r Squeezer: the ticked folder's 3 raw subs squeezed to {_sq_small:.0%} of their size, names and "
+              f"dates kept; the stack and the unticked folder left alone (survey {len(_sq_sv.get('todo', []))} to do, "
+              f"{_sq_sv.get('skipped')}; run {_sq_run.get('done')})")
+        _sq_after = core.analyze_frame(_sq_p0)
+        _sq_pix1, _sq_cards1, _sq_look1 = core.read_fits(_sq_p0)
+        import stacking as _sq_st
+        _sq_src = _sq_st.ImageSource(_sq_p0)
+        _sq_rows_ok = np.array_equal(_sq_src.read_rows(100, 64), _sq_pix0[100:164])
+        _sqe.edit_header(_sq_p0, {"OBJECT": "NGC 281 Pacman", "FOCPOS": 4321})
+        _sq_vals = _sqe.read_values(_sq_p0, ["OBJECT", "FOCPOS", "FILTER"])
+        _sq_pix2 = core.read_fits(_sq_p0)[0]
+        _sqe.edit_header(_sq_p0, {"OBJECT": "NGC 281", "FOCPOS": None})
+        check(np.array_equal(_sq_pix1, _sq_pix0) and np.array_equal(_sq_before["thumb"], _sq_after["thumb"])
+              and _sq_before["metrics"] == _sq_after["metrics"] and _sq_look1.get("FILTER") == "Ha"
+              and _sq_look1.get("NAXIS1") == 2111 and _sq_rows_ok and np.array_equal(_sq_pix2, _sq_pix0)
+              and _sq_vals == {"OBJECT": "NGC 281 Pacman", "FOCPOS": 4321, "FILTER": "Ha"},
+              "Fitz'r Squeezer: a squeezed sub reads the same everywhere - pixels, header, grading (same thumbnail "
+              "and star measurements), stacking's row by row reading - and its header can still be edited")
+        _sq_same = _sqo.same_capture(_sq_nina / _sq_p0.name, _sq_p0) and not _sqo.same_capture(
+            _sq_nina / _sq_p0.name, _sq_files[1]) and _sqo.same_bytes(_sq_nina / _sq_p0.name, _sq_p0)
+        _sq_nc = _nc.check_one({"name": "E", "folder": str(_sq_nina), "keep_days": 0},
+                               {_sq_p0.name.lower(): [(_sq_p0, _sq_p0.stat().st_size)]})
+        check(_sq_same and len(_sq_nc["safe"]) == 1,
+              f"Fitz'r Squeezer: a squeezed library copy is still the same frame as the unsqueezed one on a N.I.N.A. "
+              f"computer - for Organize's duplicate check and for Clean Up My N.I.N.A. Computers ({_sq_nc['keep']})")
+        _sqw.r_unsqueeze.setChecked(True)
+        _sqw.tick(_sq_dir)
+        _sqw.work_out(wait=True)
+        _sq_usv = _sqw.survey_rep or {}
+        _sqw.go(confirm=False, wait=True)
+        _sq_back = all(p.read_bytes() == _sq_orig[p.name] for p in _sq_files)
+        _sqw.reject()
+        w.settings.setValue("auto_org/dst", _sq_saved)
+        # the codec on its own: an odd-sized colour picture (3 planes) and 8-bit data, back bit for bit
+        _sq_ok8 = True
+        for _sq_a, _sq_bp in (((_sq_rng.poisson(40, (3, 37, 1029)) * 4).astype(np.float64), 16),
+                              (_sq_rng.integers(0, 255, (21, 1500)).astype(np.float64), 8)):
+            _sq_tp = _sq_root / f"codec_{_sq_bp}.fits"
+            core.write_fits(_sq_tp, _sq_a, {}, bitpix=_sq_bp)
+            _sq_b = _sq_tp.read_bytes()
+            _sq_c = _sqz.squeeze_bytes(_sq_b)
+            _sq_tp.write_bytes(_sq_c)
+            _sq_ok8 = _sq_ok8 and _sqt.expand_file(_sq_c) == _sq_b and np.array_equal(core.read_fits(_sq_tp)[0],
+                                                                                      _sq_a.astype(np.float32))
+        check(len(_sq_usv.get("todo", [])) == 3 and _sq_back and _sq_ok8,
+              "Fitz'r Squeezer: Unsqueeze gives back every original file byte for byte; colour and 8-bit pictures "
+              "squeeze and read back exactly")
         # Filter Identifier: synthetic raw colour subs made to the reference fingerprints are told apart; the focus
         # position tells no filter from L-CCD; a mono sub is declined; frames with a known filter teach it
         import filter_id as _fi

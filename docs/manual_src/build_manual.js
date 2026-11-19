@@ -145,6 +145,7 @@ table(["Feature", "What it does for you", "Where"], [
   ["Real-time guiding analysis", "The guiding RMS N.I.N.A. recorded for every sub - shown, charted and used in culling.", "6.2"],
   ["Fast Track after the night", "N.I.N.A. starts Fast Track when its sequence ends: a finished picture waiting in the morning.", "4.5"],
   ["Organize and re-organize your data", "Every rig's subs filed by rig or target, night and filter - on a schedule, from a NAS; a library re-sorted in place; every run undoable.", "13.3"],
+  ["Fitz'r Squeezer", "Raw subs shrunk to half their size or less without losing a bit - still open everywhere; Unsqueeze any time.", "13.4"],
   ["Image QC and culling", "Every sub measured and badged against its own filter, a session chart, three Auto-cull strengths.", "Chapter 6"],
   ["Filter names, FITS headers, viewer", "Add or correct the filter of any subs; edit headers across many files with undo; a FITS and XISF viewer.", "6.4"],
   ["Calibration masters built for you", "Bias, darks, flats and dark-flats turned into masters, no lights needed, then matched to each night automatically.", "Chapter 7"],
@@ -944,6 +945,24 @@ bullets([
   "**Reading is quick after the first time.** SubZeroAstro remembers each sub's measurements, and *Star measurement: Fast* reads only part of each file (4.4), so re-opening a night on the NAS is nearly instant.",
   "**On a Mac** the share must be connected (Finder › Go › Connect to Server…) to appear under */Volumes*; tick *Remember this password in my keychain* the first time, so automatic runs can reconnect it.",
 ]);
+
+sec("13.4", "Fitz'r Squeezer: free disk space", ["Fitz'r Squeezer", "Squeeze", "Unsqueeze", "Free disk space", "Compressed FITS", "Rice compression", ".fz files"]);
+p("Raw subs are what fill a drive. **File › Fitz'r Squeezer (Free Disk Space)…** shrinks them to about half their size or less - typically 40-50 % for a 16-bit camera - **without losing a single bit**. It uses FITS's own lossless compression (Rice, the same one fpack, N.I.N.A. and Siril write), so the files keep their names and still open in SubZeroAstro, PixInsight, Siril, N.I.N.A. and ASTAP like any other FITS file. Nothing about the picture or its header changes; it only takes less room.");
+steps([
+  "**Tick the folders** to include. Your organized library is always in the list (open it with the arrows: rig, target, night, filter); a ticked folder includes every folder inside it. **Add Another Folder…** adds any other folder - another drive or an old archive.",
+  "Choose **Squeeze** (smaller) or **Unsqueeze** (back to full size).",
+  "Press **Work Out the Savings**. It reads the headers, then squeezes a few files in memory (nothing is written) and tells you how much room it would free - e.g. *1,234 files to squeeze: 64.2 GB now, about 27 GB squeezed - that frees about 37 GB*.",
+  "Press **Squeeze 1,234 Files…** and confirm. It shows how far it has got and about how long is left; **Stop** stops after the file it is on.",
+]);
+bullets([
+  "**Every file is checked before its original goes.** The squeezed copy is unpacked in memory and must give back the original file byte for byte; it is written next to the original, read back from the drive and compared, and only then takes the original's place in one step - a crash or a power cut leaves the old file or the new one, never half of one. The file's date stays as it was.",
+  "**What is left alone:** stacks, masters and processed pictures (decimal numbers - they hardly shrink), files already squeezed, XISF files, and anything that isn't a single picture. The summary says how many and why.",
+  "**Unsqueeze** puts files back to full size, exactly as they were before squeezing (checked the same way). It first checks the drive has room. Compressed files from other programs (*.fits.fz* from fpack or Siril, or N.I.N.A.'s compressed FITS) can be unsqueezed too - an *.fz* file becomes a normal *.fits* file.",
+  "**Everything in SubZeroAstro reads squeezed files**: grading, the viewer, stacking, Calibration Masters, Organize and Edit Headers. Organize and **Clean Up My N.I.N.A. Computers** still recognise a squeezed library copy as the same frame as the full-size one on a rig's computer (a squeezed file remembers its original size and fingerprint).",
+  "**Squeeze targets you have finished with** - it is safe on any folder, but there is little point squeezing subs you are still collecting. If Organize Automatically starts filing new subs while the Squeezer runs, the Squeezer waits until it has finished.",
+  "Squeezing is work for the computer: roughly 3-6 seconds per 26-megapixel sub, longer over Wi-Fi to a NAS. A big library is best squeezed overnight - you can Stop and carry on another day; files already squeezed are skipped.",
+]);
+tip("Squeezed subs open more slowly in some programs than full-size ones, because they are unpacked as they are read. If you are about to reprocess a target many times, Unsqueeze it first and squeeze it again when you are done.");
 
 ch(14, "Privacy, licence and credits");
 sec("14.1", "Privacy", ["Privacy"]);

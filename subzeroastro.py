@@ -1456,6 +1456,11 @@ class MainWindow(QMainWindow):
                                        "already filed in your organized library (checked first)")
         self.act_nina_clean.triggered.connect(lambda: self.open_nina_cleanup())
         m.addAction(self.act_nina_clean)
+        self.act_squeezer = QAction("Fitz'r Squeezer (Free Disk Space)…", self)
+        self.act_squeezer.setToolTip("Shrink raw subs in the folders you pick to about half their size or less, "
+                                     "without losing a single bit - and put them back to full size any time")
+        self.act_squeezer.triggered.connect(lambda: self.open_squeezer())
+        m.addAction(self.act_squeezer)
         m.addSeparator()
         if ORGANIZER_ENABLED:
             m.addAction(self.act_organize)
@@ -1778,6 +1783,14 @@ class MainWindow(QMainWindow):
         if show:
             d.show()
         d.run(wait=wait)
+        return d
+
+    def open_squeezer(self, show=True):
+        """File › Fitz'r Squeezer…"""
+        import squeezer_window
+        d = squeezer_window.SqueezerDialog(self, self.settings)
+        if show:
+            d.exec()
         return d
 
     def open_nina_cleanup(self, show=True):

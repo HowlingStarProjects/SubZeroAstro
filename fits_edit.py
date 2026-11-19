@@ -86,10 +86,27 @@ def _value_of(card: str):
     return core.parse_card(card)
 
 
+def _picture_header(f):
+    """(cards, where the header starts, its length) of the header that describes the picture: the main header,
+    or - in a squeezed (tile-compressed) file, whose main header is empty - the compressed picture's."""
+    cards, n = _read_header(f)
+    empty = any(c[:8].strip() == "NAXIS" and str(_value_of(c)[1]) == "0" for c in cards)
+    if empty:
+        here = f.tell()
+        try:
+            ext, n2 = _read_header(f)
+        except ValueError:
+            ext = None
+        if ext and any(c[:8].strip() == "ZIMAGE" and _value_of(c)[1] is True for c in ext):
+            return ext, n, n2
+        f.seek(here)
+    return cards, 0, n
+
+
 def read_values(path, keys) -> dict:
-    """{key: value or None} from a FITS file's primary header."""
+    """{key: value or None} from a FITS file's header (a squeezed file's picture header)."""
     with open(path, "rb") as f:
-        cards, _n = _read_header(f)
+        cards, _at, _n = _picture_header(f)
     out = {k.upper(): None for k in keys}
     for c in cards:
         k, v, _cm = _value_of(c)
@@ -108,7 +125,12 @@ def edit_header(path, changes: dict, undo: dict | None = None) -> dict:
     if bad:
         raise ValueError(f"{', '.join(bad)} describe the image data itself and can't be changed")
     with open(path, "rb") as f:
-        cards, old_len = _read_header(f)
+        cards, at, old_len = _picture_header(f)
+    if at:                                     # squeezed: the table's own keywords can't be changed either
+        import fits_tiles as ft
+        bad = [k for k in changes if ft.is_table_key(k.upper()) or ft.picture_key(k.upper()) != k.upper()]
+        if bad:
+            raise ValueError(f"{', '.join(bad)} describe the image data itself and can't be changed")
     old = {}
     for key, value in changes.items():
         key = key.upper()[:8]
@@ -130,12 +152,15 @@ def edit_header(path, changes: dict, undo: dict | None = None) -> dict:
     head = body.ljust(n).encode("ascii")
     if n == old_len:
         with open(path, "r+b") as f:                      # same size: only the header blocks are rewritten
+            f.seek(at)
             f.write(head)
     else:
         tmp = path.with_name(path.name + ".sza_tmp")
         try:
             with open(path, "rb") as src, open(tmp, "wb") as dst:
-                src.seek(old_len)
+                if at:
+                    dst.write(src.read(at))           # a squeezed file's empty main header, as it was
+                src.seek(at + old_len)
                 dst.write(head)
                 shutil.copyfileobj(src, dst, 1 << 22)
             os.replace(tmp, path)

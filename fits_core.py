@@ -150,11 +150,12 @@ def cards_to_dict(cards) -> dict:
 
 class Layout:
     """Where the image lives inside a FITS file, plus its header."""
-    __slots__ = ("cards", "look", "offset", "shape", "bitpix", "bscale", "bzero")
+    __slots__ = ("cards", "look", "offset", "shape", "bitpix", "bscale", "bzero", "comp")
 
-    def __init__(self, cards, look, offset, shape, bitpix, bscale, bzero):
+    def __init__(self, cards, look, offset, shape, bitpix, bscale, bzero, comp=None):
         self.cards, self.look, self.offset = cards, look, offset
         self.shape, self.bitpix, self.bscale, self.bzero = shape, bitpix, bscale, bzero
+        self.comp = comp          # a squeezed (tile-compressed) picture: fits_tiles.CompInfo, else None
 
     @property
     def bytes_per_pixel(self):
@@ -191,7 +192,7 @@ def read_layout(f) -> Layout:
                 look.update(elook)
                 break
             if xt == "BINTABLE" and elook.get("ZIMAGE"):
-                raise ValueError("Compressed FITS (fpack/.fz) is not supported")
+                return _compressed_layout(f, primary, plook, ext, elook)
             f.seek(_padded(enbytes), os.SEEK_CUR)
     bitpix = int(look["BITPIX"])
     if bitpix not in _BITPIX_DTYPE:
@@ -202,6 +203,59 @@ def read_layout(f) -> Layout:
     _check_not_text_mangled(f, offset, _data_nbytes(look))
     return Layout(cards, look, offset, shape, bitpix,
                   float(look.get("BSCALE", 1.0) or 1.0), float(look.get("BZERO", 0.0) or 0.0))
+
+
+def _compressed_layout(f, primary, plook, ext, elook) -> Layout:
+    """A picture squeezed with FITS's own tile compression (the Fitz'r Squeezer, fpack, N.I.N.A., Siril): its
+    header is given back with the picture's own keywords (ZBITPIX -> BITPIX …), the table's left out."""
+    import fits_tiles as ft
+    ci = ft.CompInfo(elook, f.tell())
+    cards = []
+    for k, v, c in ext:
+        if k and ft.is_table_key(k):
+            continue
+        cards.append((ft.picture_key(k), v, c))
+    have = {c[0] for c in cards}
+    lead = [c for c in primary if c[0] not in have and c[0] not in ("SIMPLE", "BITPIX", "NAXIS", "EXTEND")]
+    cards = lead + cards
+    look = {k: v for k, v in plook.items() if k not in ("SIMPLE", "BITPIX", "NAXIS", "EXTEND")}
+    look.update(cards_to_dict(cards))
+    look["BITPIX"] = ci.zbitpix
+    look["NAXIS"] = len(ci.zshape)
+    for i, n in enumerate(ci.zshape, start=1):
+        look[f"NAXIS{i}"] = n
+    look["_SQUEEZED"] = ci.cmp
+    bitpix = ci.zbitpix
+    if bitpix not in _BITPIX_DTYPE:
+        raise ValueError(f"Unsupported BITPIX {bitpix}")
+    return Layout(cards, look, f.tell(), ci.shape, bitpix,
+                  float(look.get("BSCALE", 1.0) or 1.0), float(look.get("BZERO", 0.0) or 0.0), comp=ci)
+
+
+def _comp_values(vals: np.ndarray, lay: Layout) -> np.ndarray:
+    """Stored numbers from a squeezed picture -> float32 in the picture's units (BSCALE / BZERO)."""
+    if lay.bitpix == 8:
+        vals = vals & 255
+    data = vals.astype(np.float32)
+    if lay.bitpix > 0 or not lay.comp.quantized:
+        if lay.bscale != 1.0:
+            data *= np.float32(lay.bscale)
+        if lay.bzero != 0.0:
+            data += np.float32(lay.bzero)
+    return data
+
+
+def read_data(f, lay: Layout) -> np.ndarray:
+    """The whole picture of an open file (float32, numpy order)."""
+    if lay.comp is not None:
+        import fits_tiles as ft
+        return _comp_values(ft.read_region(f, lay.comp), lay)
+    count = int(np.prod(lay.shape))
+    f.seek(lay.offset)
+    raw = f.read(count * lay.bytes_per_pixel)
+    if len(raw) < count * lay.bytes_per_pixel:
+        raise ValueError("File is truncated (image data incomplete)")
+    return _decode(raw, lay, lay.shape)
 
 
 TEXT_MANGLED = ("This file is damaged: its picture data was converted to text somewhere along the way (a "
@@ -240,6 +294,9 @@ def _decode(raw: bytes, lay: Layout, shape) -> np.ndarray:
 
 def read_rows(f, lay: Layout, r0: int, n: int) -> np.ndarray:
     """Read n consecutive rows (file order) of a 2-D image from an open file."""
+    if lay.comp is not None:
+        import fits_tiles as ft
+        return _comp_values(ft.read_region(f, lay.comp, r0, n), lay)
     f.seek(lay.offset + r0 * lay.row_bytes)
     raw = f.read(n * lay.row_bytes)
     if len(raw) < n * lay.row_bytes:
@@ -290,11 +347,8 @@ def read_fits(path, header_only: bool = False):
         lay = read_layout(f)
         if header_only:
             return None, lay.cards, lay.look
-        count = int(np.prod(lay.shape))
-        raw = f.read(count * lay.bytes_per_pixel)
-        if len(raw) < count * lay.bytes_per_pixel:
-            raise ValueError("File is truncated (image data incomplete)")
-    return _decode(raw, lay, lay.shape), lay.cards, lay.look
+        data = read_data(f, lay)
+    return data, lay.cards, lay.look
 
 
 def _ascii(x) -> str:
@@ -830,13 +884,18 @@ def _date_obs(path) -> str | None:
             return None
     try:
         with open(path, "rb") as fh:
-            head = fh.read(2880 * 3)
+            head = fh.read(2880 * 5)          # a squeezed file's header starts one block later
+        empty_main = False
         for i in range(0, len(head) - 79, 80):
             card = head[i:i + 80]
             if card.startswith(b"DATE-OBS="):
                 return card[10:80].split(b"/")[0].strip().strip(b"'").strip().decode("ascii", "replace")
+            if card.startswith(b"NAXIS   =") and card[10:30].strip() == b"0":
+                empty_main = True                 # the picture (a squeezed one) is in the next header
             if card.startswith(b"END "):
-                break
+                if not empty_main:
+                    break
+                empty_main = False
     except OSError:
         pass
     return None
@@ -974,11 +1033,7 @@ def analyze_frame(path, mode: str = "fast") -> dict:
         result = {"cards": lay.cards, "info": frame_info(look), "mode": mode}
 
         if len(lay.shape) != 2 or mode == "full":
-            count = int(np.prod(lay.shape))
-            raw = f.read(count * lay.bytes_per_pixel)
-            if len(raw) < count * lay.bytes_per_pixel:
-                raise ValueError("File is truncated (image data incomplete)")
-            data = _decode(raw, lay, lay.shape)
+            data = read_data(f, lay)
             plane = to_display_plane(data, look)
             thumb, params = make_thumbnail(plane)
             result.update(thumb=thumb, stretch=params, display_size=(plane.shape[1], plane.shape[0]))
@@ -988,6 +1043,13 @@ def analyze_frame(path, mode: str = "fast") -> dict:
             return result
 
         # --- sampled read ---------------------------------------------------
+        if lay.comp is not None:          # squeezed: unpacked once (a row at a time would unpack it many times)
+            whole = read_data(f, lay)
+
+            def read_rows(_f, _lay, r0, n):
+                return whole[r0:r0 + n]
+        else:
+            read_rows = _read_rows_file
         k = 2 if bayer else 1
         dny, dnx = ny // k, nx // k                       # display-plane size
         step = max(1, int(np.ceil(max(dny, dnx) / THUMB_LONG)))
@@ -1327,3 +1389,6 @@ def is_network_path(path) -> bool:
         except Exception:  # noqa: BLE001
             return False
     return False
+
+
+_read_rows_file = read_rows
