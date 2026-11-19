@@ -6139,6 +6139,8 @@ def run(app, out_dir: Path) -> int:
         _ur_dir.mkdir(parents=True, exist_ok=True)
         (_ur_dir / "NGC 281_0001.fits").write_bytes(b"\n    float8 dot0 = 0;\n" * 200)
         (_ur_dir / "NGC 281_0002.fits").write_bytes(b"\xff\xd8\xff\xe0" + b"\x01" * 4000)
+        _ur_left = _au_root / "unreadable_left.fits"           # FITS-sized, leftover disk data inside
+        _ur_left.write_bytes(bytes((7 * _k) % 251 + 1 for _k in range(2880 * 3)))
         _ur_items = _og.classify(sorted(_ur_dir.glob("*.fits")), library=_au_root / "unreadable_lib",
                                  root=_ur_dir.parent)
         _ur_keep = (_owin.items, getattr(_owin, "_plan_args", None))
@@ -6151,6 +6153,7 @@ def run(app, out_dir: Path) -> int:
         _owin.items, _owin._plan_args = _ur_keep
         check(all(i.status == "error" for i in _ur_items)
               and "plain text, not a picture" in _ur_items[0].why and ".jpg picture" in _ur_items[1].why
+              and "never written into it" in _og.what_it_is(_ur_left)
               and "2 in" in _ur_note and "SQA55" in _ur_note and "right-click" in _ur_note
               and str(_ur_dir / "NGC 281_0001.fits") in _ur_copy and "plain text" in _ur_copy
               and _ur_all.count("\n") == 1 and _ur_clip == _ur_all,
