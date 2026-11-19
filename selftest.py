@@ -6125,6 +6125,29 @@ def run(app, out_dir: Path) -> int:
               and not (_og.org_base(_au_lib) / "Light Frames" / "SQA60Pro").exists(),
               f"Change My Library's Layout: the library re-sorted from by rig to by target, then rig, in place, "
               f"old folders cleaned up ({_au_re})")
+        # a file with a FITS name that isn't a picture: the plan says in plain words what it really is and which
+        # folder it is in, and the list can be copied (full path and why) - no hand-copying from a tooltip
+        _ur_dir = _au_root / "unreadable_incoming" / "SQA55"
+        _ur_dir.mkdir(parents=True, exist_ok=True)
+        (_ur_dir / "NGC 281_0001.fits").write_bytes(b"\n    float8 dot0 = 0;\n" * 200)
+        (_ur_dir / "NGC 281_0002.fits").write_bytes(b"\xff\xd8\xff\xe0" + b"\x01" * 4000)
+        _ur_items = _og.classify(sorted(_ur_dir.glob("*.fits")), library=_au_root / "unreadable_lib",
+                                 root=_ur_dir.parent)
+        _ur_keep = (_owin.items, getattr(_owin, "_plan_args", None))
+        _owin._show_plan(_ur_items)
+        _ur_note = _owin.status.text()
+        _owin.table.clearSelection()
+        _ur_copy = _owin.copy_rows(rows=list(range(_owin.table.rowCount())))
+        _ur_all = _owin.copy_rows(unread=True)
+        _ur_clip = QApplication.clipboard().text()
+        _owin.items, _owin._plan_args = _ur_keep
+        check(all(i.status == "error" for i in _ur_items)
+              and "plain text, not a picture" in _ur_items[0].why and ".jpg picture" in _ur_items[1].why
+              and "2 in" in _ur_note and "SQA55" in _ur_note and "right-click" in _ur_note
+              and str(_ur_dir / "NGC 281_0001.fits") in _ur_copy and "plain text" in _ur_copy
+              and _ur_all.count("\n") == 1 and _ur_clip == _ur_all,
+              f"Organize: a file that isn't a picture is named for what it is ({_ur_items[0].why[:60]}…), its folder "
+              f"is shown, and the list copies with full paths")
         for _k, _v in zip(("organize/riglist", "organize/rig_tol", "stack/rigs"), _keep_rl):
             w.settings.setValue(_k, _v)
         _owin.close()

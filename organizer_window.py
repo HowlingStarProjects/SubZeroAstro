@@ -245,10 +245,18 @@ class OrganizeDialog(QDialog):
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.Interactive)
-        hh.setSectionResizeMode(2, QHeaderView.Stretch)
-        hh.setSectionResizeMode(3, QHeaderView.Interactive)
+        hh.setSectionResizeMode(2, QHeaderView.Interactive)      # every column can be dragged wider; the last
+        hh.setSectionResizeMode(3, QHeaderView.Interactive)      # (Why) fills what is left
+        hh.setStretchLastSection(True)
         self.table.setColumnWidth(1, 260)
+        self.table.setColumnWidth(2, 360)
         self.table.setColumnWidth(3, 260)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)        # right-click: copy, show in folder
+        self.table.customContextMenuRequested.connect(self._table_menu)
+        from PySide6.QtGui import QKeySequence, QShortcut
+        self._copy_key = QShortcut(QKeySequence(QKeySequence.Copy), self.table)
+        self._copy_key.setContext(Qt.WidgetShortcut)
+        self._copy_key.activated.connect(lambda: self.copy_rows())
         lay.addWidget(self.table, 1)
         b = QPushButton("Close")
         b.clicked.connect(self.close)
@@ -558,6 +566,49 @@ class OrganizeDialog(QDialog):
             return O.plan(items, lib, progress=lambda t, i, n: job.note.emit(t, i, n), stop=lambda: job.stop)
         self._run(work, self._show_plan, wait)
 
+    def _row_path(self, r) -> str:
+        """The full path of the file on row r (the File cell keeps it as its tooltip)."""
+        it = self.table.item(r, 1)
+        return (it.toolTip() or it.text()) if it is not None else ""
+
+    def copy_rows(self, rows=None, unread=False) -> str:
+        """Copy rows as text you can paste into an e-mail or a note: full path, then Why. unread: every file that
+        couldn't be read, not just the rows shown."""
+        if unread:
+            lines = [f"{i.src}\t{i.why}" for i in (getattr(self, "items", None) or []) if i.status == "error"]
+        else:
+            if rows is None:
+                rows = sorted({ix.row() for ix in self.table.selectedIndexes()})
+            lines = []
+            for r in rows:
+                why = self.table.item(r, 3)
+                lines.append(f"{self._row_path(r)}\t{why.text() if why is not None else ''}")
+        text = "\n".join(lines)
+        if text:
+            QApplication.clipboard().setText(text)
+        return text
+
+    def _table_menu(self, pos):
+        from PySide6.QtWidgets import QMenu
+        import tools as _tl
+        rows = sorted({ix.row() for ix in self.table.selectedIndexes()}) or (
+            [self.table.rowAt(pos.y())] if self.table.rowAt(pos.y()) >= 0 else [])
+        m = QMenu(self)
+        a_copy = m.addAction(f"Copy ({len(rows)} row{'s' if len(rows) != 1 else ''}: full path and why)")
+        a_copy.setEnabled(bool(rows))
+        a_show = m.addAction("Show in Folder")
+        a_show.setEnabled(bool(rows))
+        n_bad = sum(1 for i in (getattr(self, "items", None) or []) if i.status == "error")
+        a_bad = m.addAction(f"Copy All {n_bad} Files That Couldn't Be Read")
+        a_bad.setEnabled(bool(n_bad))
+        got = m.exec(self.table.viewport().mapToGlobal(pos))
+        if got is a_copy:
+            self.copy_rows(rows)
+        elif got is a_show and rows:
+            _tl.reveal(self._row_path(rows[0]))
+        elif got is a_bad:
+            self.copy_rows(unread=True)
+
     def _show_plan(self, items, note=""):
         self.items = items
         self._organized = False
@@ -584,7 +635,13 @@ class OrganizeDialog(QDialog):
             parts.append(f"{sm['duplicate']} duplicate(s) - left where they are; press <b>Step 2 – Duplicates…</b> to "
                          "keep, set aside or delete them")
         if sm.get("error"):
-            parts.append(f"{sm['error']} file(s) could not be read - left where they are")
+            import html as _h
+            where = O.unread_where(items)
+            parts.append(f"{sm['error']} file(s) could not be read - left where they are"
+                         + "".join(f"<br>&nbsp;&nbsp;• {n} in <b>{_h.escape(f)}</b>"
+                                   + (f": {_h.escape(w)}" if w else "") for f, n, w in where)
+                         + ("<br>&nbsp;&nbsp;(right-click the list to copy their names or open their folder)"
+                            if where else ""))
         if O.SKIPPED:
             parts.append(f"{len(O.SKIPPED)} folder(s) not looked into on purpose (saved projects, PixInsight/Siril "
                          "work folders, hidden folders) - their files stay where they are")
