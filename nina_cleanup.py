@@ -116,6 +116,29 @@ def check_one(comp, idx, keep_days=None, now=None, progress=None, stop=None) -> 
             rep["keep"].append((p, f"newer than {keep_days:g} day(s)"))
             continue
         cands = [(q, s) for q, s in idx.get(p.name.lower(), []) if s == st.st_size]
+        squeezed = []
+        if not cands:                    # the library's copy may be squeezed (Fitz'r Squeezer): its original's size
+            import squeezer
+            for q, _s in idx.get(p.name.lower(), []):
+                try:
+                    osz, oh = squeezer.original_id(q, _s)
+                except OSError:
+                    continue
+                if oh and osz == st.st_size:
+                    squeezed.append((q, oh))
+        if not cands and squeezed:
+            try:
+                mine = O._quick_hash(p)
+            except OSError as e:
+                rep["keep"].append((p, f"couldn't read it ({e})"))
+                continue
+            match = next((q for q, oh in squeezed if oh == mine), None)
+            if match is None:
+                rep["keep"].append((p, "the library's file of that name has different contents"))
+            else:
+                rep["safe"].append((p, st.st_size, match))
+                rep["bytes"] += st.st_size
+            continue
         if not cands:
             why = ("not in your organized library yet (not copied, or not organized yet)"
                    if not idx.get(p.name.lower()) else "the library's file of that name is a different size")
@@ -150,6 +173,15 @@ def check(computers, library, keep_days=None, now=None, progress=None, stop=None
     return [check_one(c, idx, keep_days, now, progress, stop) for c in computers]
 
 
+def _squeezed_size(p):
+    import squeezer
+    try:
+        osz, oh = squeezer.original_id(p)
+        return osz if oh else None
+    except OSError:
+        return None
+
+
 def delete(reps, progress=None, stop=None) -> list:
     """Deletes the files each report found safe (checked again just before: still there, same size), then the
     folders that became empty - never the shared folder itself. [{name, deleted, bytes, failed: [(path, why)]}]"""
@@ -164,7 +196,9 @@ def delete(reps, progress=None, stop=None) -> list:
             if progress and i % 25 == 0:
                 progress(f"{rep['name']}: deleting {i + 1} of {len(rep['safe'])}", i, len(rep["safe"]))
             try:
-                if not Path(match).is_file() or Path(match).stat().st_size != size:
+                # (a squeezed library copy counts with its size before squeezing)
+                if not Path(match).is_file() or (Path(match).stat().st_size != size and
+                                                 _squeezed_size(match) != size):
                     done["failed"].append((p, "the library copy changed since the check - kept"))
                     continue
                 os.remove(p)
