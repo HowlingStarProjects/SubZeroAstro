@@ -1784,6 +1784,33 @@ def run(app, out_dir: Path) -> int:
     check(_mp is not None and _mp.stat().st_size > 100000 and _hm is not None
           and any("User Manual" in x.text() for x in _hm.actions()),
           f"Help > User Manual (PDF) is there and the manual ships with the app ({_mp})")
+    _jk_texts = [a.text() for a in _hm.actions()] if _hm is not None else []
+    _jk_msgs = []
+    for _jk_key in ("clouds", "bortle"):
+        _jk_act = getattr(w, "joke_actions", {}).get(_jk_key)
+        if _jk_act is not None:
+            _jk_act.trigger()
+            QApplication.processEvents()
+            _jk_box = getattr(w, "_joke_box", None)
+            _jk_msgs.append(_jk_box.text() if _jk_box is not None else "")
+            if _jk_box is not None:
+                _jk_box.close()
+                QApplication.processEvents()
+    _jk_pr = getattr(w, "joke_actions", {}).get("prayer")
+    _jk_pr_msg = ""
+    if _jk_pr is not None:
+        _jk_pr.trigger()
+        QApplication.processEvents()
+        _jk_pr_box = getattr(w, "_joke_box", None)
+        _jk_pr_msg = _jk_pr_box.text() if _jk_pr_box is not None else ""
+        if _jk_pr_box is not None:
+            _jk_pr_box.close()
+            QApplication.processEvents()
+    check("Weather Prayer" in _jk_texts and _jk_pr_msg.startswith("Dear God, I have been really good")
+          and _jk_pr_msg.endswith("Amen."), f"Help > Weather Prayer shows the prayer ({_jk_pr_msg[:40]}...)")
+    check("Make Clouds Disappear" in _jk_texts and "Make My Bortle Better" in _jk_texts
+          and len(_jk_msgs) == 2 and all("Coming soon... Not!" in _jk_t for _jk_t in _jk_msgs),
+          f"Help > Make Clouds Disappear / Make My Bortle Better answer 'Coming soon... Not!' ({_jk_msgs})")
     check(_uh.app_icon_path() is not None and not QApplication.windowIcon().isNull(),
           f"the SubZeroAstro icon ships with the app and is set on the windows ({_uh.app_icon_path()})")
     w.show()
@@ -4813,6 +4840,78 @@ def run(app, out_dir: Path) -> int:
         check(_au_l1 and not _au_l2,
               f"Organize Automatically: a run left behind by SubZeroAstro being closed (or the computer switched "
               f"off) no longer blocks the next run ({_au_l1}, {_au_l2})")
+        # Automatic jobs from one computer only: the computer that turns them on is named in a marker in the library;
+        # another computer is asked before it takes over, and a computer that was taken over steps aside
+        import one_computer as _oc
+        _oc_root = _au_root / "one_computer"
+        _oc_inc, _oc_lib = _oc_root / "Incoming" / "SQA60Pro", _oc_root / "Library"
+        _oc_inc.mkdir(parents=True)
+        _oc_lib.mkdir()
+        core.write_fits(_oc_inc / "f.fits", (_orng.random((16, 16)) * 4000).astype(np.uint16),
+                        {"IMAGETYP": "Light Frame", "EXPTIME": 180.0, "DATE-OBS": "2026-10-02T03:40:00",
+                         "INSTRUME": "ZWO ASI2600MM Pro", "FOCALLEN": 361, "OBJECT": "M 31", "FILTER": "Ha",
+                         "SITELONG": -95.0}, bitpix=16)
+        os.utime(_oc_inc / "f.fits", (_au_old, _au_old))
+        _oc_me = _oc.this_computer()
+        _oc_first = _oc.ask_take_over(None, w.settings, "organize", lib=str(_oc_lib))     # nobody yet: no question
+        _oc_m1 = _oc.read(str(_oc_lib)) or {}
+        _oc.marker_path(str(_oc_lib)).write_text(__import__("json").dumps(
+            {"id": "selftest-other-pc", "computer": "ASTROCOMP", "jobs": ["organize", "asiair_night"],
+             "since": "2026-11-01 07:00"}), encoding="utf-8")
+        _oc_cfg = {"src": str(_oc_root / "Incoming"), "dst": str(_oc_lib), "layout": "rig", "on": True}
+        _oc_rep = _au.run(_oc_cfg, w.settings)                         # this computer was taken over: steps aside
+        _oc_once = _oc.check_run(str(_oc_lib), "organize", on_here=False)   # a one-off Run Now still runs
+        _oc_saved = {k: w.settings.value(k, "") for k in ("auto_org/dst", "asiair/night", "nina_clean/with_auto",
+                                                              "asiair/list", "nina_clean/list")}
+        w.settings.setValue("auto_org/dst", str(_oc_lib))
+        _oc._answer = False                                              # "Leave It on ASTROCOMP"
+        import organizer_window as _oc_ow
+        _oc_ad = _oc_ow.AutoDialog(w.settings, _owin)
+        _oc_ad.src.setText(str(_oc_root / "Incoming"))
+        _oc_ad.dst.setText(str(_oc_lib))
+        _oc_on0 = w.settings.value("auto_org/on", False, type=bool)
+        _oc_ad.turn_on()                                                 # declined: nothing scheduled, still off
+        _oc_note = _oc_ad.note.text()
+        _oc_on1 = w.settings.value("auto_org/on", False, type=bool)
+        _oc_ad.close()
+        import asiair_window as _oc_awm
+        _oc_aw = _oc_awm.AsiairDialog(w, w.settings)                    # its own window (not the one tested below)
+        _oc_aw.night.setChecked(True)
+        _oc_aw.save()
+        _oc_night = (_oc_aw.night.isChecked(), w.settings.value("asiair/night", False, type=bool))
+        _oc_aw.close()
+        _oc_nw = w.open_nina_cleanup(show=False)
+        _oc_nw.with_auto.setChecked(True)
+        _oc_nw.save()
+        _oc_nina = (_oc_nw.with_auto.isChecked(), w.settings.value("nina_clean/with_auto", False, type=bool))
+        _oc_m2 = _oc.read(str(_oc_lib)) or {}
+        _oc._answer = True                                               # "Take Over Here"
+        _oc_nw.with_auto.setChecked(True)
+        _oc_nw.save()
+        _oc_m3 = _oc.read(str(_oc_lib)) or {}
+        _oc_run2 = _oc.check_run(str(_oc_lib), "nina_clean")             # now it's ours: runs
+        _oc_nw.with_auto.setChecked(False)
+        _oc_nw.save()                                                    # turned off: the marker goes
+        _oc_gone = not _oc.marker_path(str(_oc_lib)).exists()
+        _oc_nw.reject()
+        _oc._answer = None
+        for _oc_k, _oc_v in _oc_saved.items():
+            w.settings.setValue(_oc_k, _oc_v)
+        if hasattr(w, "set_asiair_night"):
+            w.set_asiair_night(w.settings.value("asiair/night", False, type=bool))
+        check(_oc_first and _oc_m1.get("id") == _oc_me[0] and _oc_m1.get("jobs") == ["organize"]
+              and "now run on ASTROCOMP" in _oc_rep.get("error", "") and _oc_rep["filed"] == 0
+              and (_oc_inc / "f.fits").exists() and _oc_once == "",
+              f"Automatic jobs from one computer only: the computer that turns them on is named in the library "
+              f"({_oc_m1.get('computer')}); a computer that was taken over skips its runs ({_au.describe(_oc_rep)})")
+        check(not _oc_on0 and not _oc_on1 and "ASTROCOMP" in _oc_note and _oc_night == (False, False)
+              and _oc_nina == (False, False) and _oc_m2.get("computer") == "ASTROCOMP"
+              and _oc_m3.get("id") == _oc_me[0] and _oc_m3.get("jobs") == ["nina_clean"] and _oc_run2 == ""
+              and _oc_gone and _oc.jobs_text({"jobs": ["organize", "asiair_night"]})
+              == "Organize Automatically and the overnight ASIAIR fetch",
+              f"Automatic jobs from one computer only: Organize Automatically, the overnight ASIAIR fetch and the "
+              f"N.I.N.A. clean-up stay off here when you leave them on the other computer ({_oc_night}, {_oc_nina}); "
+              f"Take Over Here names this computer ({_oc_m3.get('jobs')}); turning everything off removes the marker")
         # ...and while a run is going, the Organize window says so, with where it is, every few seconds (the
         # scheduled run is its own process: it writes its progress to the settings, the window reads them)
         _lv_seen = []

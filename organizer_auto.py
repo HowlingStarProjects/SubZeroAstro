@@ -113,6 +113,15 @@ def run(cfg=None, settings=None, progress=None, now=None) -> dict:
         pass
     if not bad and not riglist:
         bad = ["Your Rigs is empty - set up your rigs once in the Organize window"]
+    if not bad:                                      # another computer took the automatic jobs over: step aside
+        try:
+            import one_computer as J
+            why = J.check_run(str(lib0), "organize", cfg.get("on", False))
+            if why:
+                bad = [why]
+                _note(f"automatic run {why}")
+        except Exception:  # noqa: BLE001
+            pass
     if bad:
         rep["error"] = "; ".join(bad)
         _finish(rep, s, None)

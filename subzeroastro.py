@@ -45,7 +45,7 @@ from chart import ChartPoint, SessionChart, filter_color
 
 APP_NAME = "SubZeroAstro"
 APP_TAGLINE = "From subs to masters - zero hassle."
-APP_VERSION = "0.9.286 beta"
+APP_VERSION = "0.9.287 beta"
 ORGANIZER_ENABLED = True       # File › Organize My Astro Files…
 ui_header.APP_VERSION = APP_VERSION       # shown in small print under the name on every page
 APP_AUTHOR = "Brian A. Poteet, DVM"
@@ -1577,6 +1577,15 @@ class MainWindow(QMainWindow):
         a = QAction("Play the Intro Animation", self)
         a.triggered.connect(self.play_splash)
         m.addAction(a)
+        m.addSeparator()
+        # just for fun: two wishes every astrophotographer has
+        self.joke_actions = {}
+        for key, text in (("clouds", "Make Clouds Disappear"), ("bortle", "Make My Bortle Better"),
+                          ("prayer", "Weather Prayer")):
+            a = QAction(text, self)
+            a.triggered.connect(lambda _=False, k=key: self.show_joke(k))
+            m.addAction(a)
+            self.joke_actions[key] = a
 
     def play_splash(self):
         import splash
@@ -1772,6 +1781,16 @@ class MainWindow(QMainWindow):
         inc = (self.settings.value("asiair/incoming", "") or "").strip()
         if not units or not inc:
             return
+        try:                                         # another computer took the automatic jobs over: step aside
+            import one_computer as J
+            why = J.check_run(J.library(self.settings), "asiair_night")
+        except Exception:  # noqa: BLE001
+            why = ""
+        if why:
+            self.asiair_stood_down = "Overnight ASIAIR fetch " + why
+            self.statusBar().showMessage(self.asiair_stood_down, 60000)
+            return
+        self.asiair_stood_down = ""
         free = self.settings.value("asiair/free", False, type=bool)
         self.asiair_job = _Job(lambda job: A.fetch_all(units, inc, stop=lambda: job.stop, free=free))
 
@@ -3726,6 +3745,25 @@ class MainWindow(QMainWindow):
             "Star measurement 'Fast' measures three bands across each frame (about a quarter "
             "of the file), which gives nearly the same numbers as 'Full frame' and is 3–4× "
             "faster on network drives."))
+
+    JOKES = {
+        "clouds": ("Make Clouds Disappear", "Clear skies, on demand!\n\nComing soon... Not! \N{CLOUD}"),
+        "bortle": ("Make My Bortle Better", "Darker skies, one click away!\n\nComing soon... Not! \N{CITYSCAPE AT DUSK}"),
+        "prayer": ("Weather Prayer",
+                   "Dear God, I have been really good and my astro equipment is ready to go. Please bless me and "
+                   "all other astrophotographers with clear dark skies, good seeing and minimal moonlight for "
+                   "tonight.  If you could also throw in some anti-Murphy's Law pixie dust and maybe a cold beer, "
+                   "that would be great and would let me know you really care about me.  Amen."),
+    }
+
+    def show_joke(self, key):
+        """Just for fun: a light-hearted 'Coming soon... Not!' for the wishes no app can grant."""
+        title, text = self.JOKES[key]
+        box = QMessageBox(QMessageBox.Information, title, text, QMessageBox.Ok, self)
+        box.setAttribute(Qt.WA_DeleteOnClose)
+        box.open()
+        self._joke_box = box
+        return box
 
     def show_about(self):
         QMessageBox.about(self, f"About {APP_NAME}", (
