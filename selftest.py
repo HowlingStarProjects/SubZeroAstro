@@ -5176,6 +5176,34 @@ def run(app, out_dir: Path) -> int:
               and _au_win[-3:] == ["WEEKLY", "/D", "MON,THU"] and "06:05" in _au_win,
               f"Organize Automatically: {_au.describe(_au_rep)}; the incoming folder may not be inside the library; "
               f"Task Scheduler: {' '.join(_au_win[-6:])}")
+        # Exact duplicates in the incoming folder (N.I.N.A. copying a frame again): deleted by the automatic run
+        # only when you ticked it, only byte-for-byte twins of a frame already in the library; anything that
+        # merely looks the same stays where it is (not moved, not deleted)
+        _aud_filed = next(iter(_au_lib.rglob("a.fits")), None)
+        _aud_copy = _au_inc / "a.fits"
+        if _aud_filed is not None:
+            _au_inc.mkdir(parents=True, exist_ok=True)
+            _ksh.copy2(_aud_filed, _aud_copy)
+            os.utime(_aud_copy, (_au_old, _au_old))
+        _aud_rep0 = _au.run(dict(_au_cfg, dups=False), w.settings)
+        _aud_kept0 = _aud_copy.exists()
+        _aud_rep1 = _au.run(dict(_au_cfg, dups=True), w.settings)
+        _aud_gone = not _aud_copy.exists() and _aud_filed is not None and _aud_filed.exists()
+        _aud_x, _aud_y = _au_root / "dupx.fits", _au_root / "dupy.fits"
+        _aud_x.write_bytes(b"A" * 5000)
+        _aud_y.write_bytes(b"A" * 4999 + b"B")
+        _aud_n, _aud_kb, _aud_log = _og.handle_duplicates(
+            [_og.Item(src=_aud_x, status="duplicate", same_as=_aud_y)], _au_lib, delete=True, leave_unlike=True)
+        check(_aud_kept0 and "duplicates - Step 2" in _au.describe(_aud_rep0) and _aud_gone
+              and _aud_rep1.get("dups") == 1 and "1 exact duplicate(s) deleted" in _au.describe(_aud_rep1)
+              and _aud_n == 0 and _aud_x.exists() and _aud_kb and _aud_kb[0][1] == _og.NOT_IDENTICAL_LEFT
+              and not (_og.org_base(_au_lib) / _og.DUP_DIR / "dupx.fits").exists()
+              and _au.load_config(w.settings).get("dups") is not None,
+              f"Organize Automatically › Delete exact duplicates: off, a duplicate stays ({_au.describe(_aud_rep0)}); "
+              f"on, an exact copy of a filed frame goes and the library's copy stays ({_au.describe(_aud_rep1)}); "
+              f"one that only looks the same is left where it is ({_aud_kb[:1]})")
+        for _aud_p in (_aud_x, _aud_y):
+            _aud_p.unlink(missing_ok=True)
         _au_mu = _au.mount_urls("//bapo@AstroNAS._smb._tcp.local/AstroDataOrganizedSAZ on /Volumes/AstroDataOrganizedSAZ "
                                 "(smbfs, nodev, nosuid, mounted by bapo)\n/dev/disk3s1 on / (apfs, local)")
         check(_au_mu == {"/Volumes/AstroDataOrganizedSAZ": "smb://bapo@AstroNAS._smb._tcp.local/AstroDataOrganizedSAZ"}
@@ -5906,6 +5934,37 @@ def run(app, out_dir: Path) -> int:
               and getattr(_ncw, "old_result", {}).get("deleted") == 2,
               f"Clean Up › Delete Old Frames on This Computer: nothing goes unless both warnings are answered Yes "
               f"({_nc_after_no}); the last warning counts the frames not in the library ({_nc_unf}); then all go")
+        # A N.I.N.A. computer that turns the sign-in away (Windows error 1326): said in plain words with what to do
+        # (Sign In…), never Python's quoted path with doubled backslashes - and the other computers still get done
+        import win_signin as _ws
+        import pathlib as _wspl
+        _ws_unc = "\\\\192.168.0.37\\Users\\PrimaLuceLab\\Documents\\N.I.N.A.\\AstroDataToShootToAstrocomp"
+        _ws_parts = _ws.unc_parts(_ws_unc)
+
+        class _WsDenied(OSError):
+            winerror = 1326
+        _ws_isdir = _wspl.Path.is_dir
+
+        def _ws_fake(self, *a, **k):
+            if "192.168.0.37" in str(self):
+                raise _WsDenied(13, "The user name or password is incorrect", str(self))
+            return _ws_isdir(self, *a, **k)
+        _wspl.Path.is_dir = _ws_fake
+        try:
+            _ws_reps = _nc.check([{"name": "Eagle", "folder": _ws_unc}, {"name": "E1", "folder": str(_nc_share)}],
+                                 str(_nc_lib))
+        finally:
+            _wspl.Path.is_dir = _ws_isdir
+        _ws_err = _ws_reps[0]["error"] if _ws_reps else ""
+        _ws_si = _ncw.sign_in(row=0, user="PrimaLuceLab", password="not-a-real-one")
+        check(_ws_parts == ("192.168.0.37", "\\\\192.168.0.37\\Users") and _ws.guess_user(_ws_unc) == "PrimaLuceLab"
+              and "Sign In" in _ws_err and "\\\\\\\\" not in _ws_err and "WinError" not in _ws_err
+              and len(_ws_reps) == 2 and not _ws_reps[1]["error"]
+              and "can't reach" in _ws.plain(type("E", (OSError,), {"winerror": 53})(2, "x"), _ws_unc)
+              and _ws_si is not None and _ws_si[0] is False and "not-a-real-one" not in _ws_si[1]
+              and "not-a-real-one" not in _ncw.status.text(),
+              f"Clean Up My N.I.N.A. Computers: a computer that turns the sign-in away says so plainly ({_ws_err}); "
+              f"the others still get checked; Sign In… on a folder that isn't on the network says so ({_ws_si})")
         _ncw.reject()
         w.settings.setValue("auto_org/dst", _nc_saved[0])
         w.settings.setValue("nina_clean/list", _nc_saved[1])

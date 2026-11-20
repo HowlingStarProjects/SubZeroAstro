@@ -75,6 +75,30 @@ def library_index(library, progress=None, stop=None) -> dict:
     return idx
 
 
+def reach(folder) -> str:
+    """'' when the N.I.N.A. computer's folder can be opened, else why not - in plain words, with what to do. A
+    computer that turns the sign-in away is signed in to again with the user name and password saved by
+    Sign In… (Windows' Credential Manager), so the automatic run gets in with no one at the keyboard."""
+    import win_signin as WS
+    root = Path(folder or "")
+    if not str(folder or "").strip():
+        return "no folder set"
+    err = None
+    for attempt in range(2):
+        try:
+            if root.is_dir():
+                return ""
+            err = None
+        except OSError as e:          # Windows: 'user name or password is incorrect' is raised, not False
+            err = e
+        if attempt or not (err is not None and WS.winerror(err) in WS.SIGNIN_ERRORS and WS.reconnect(folder)):
+            break
+    if err is not None:
+        return WS.plain(err, folder)
+    return (f"can't reach {folder} - is the computer on, is the folder shared, and is the path right? "
+            "(Try opening it in File Explorer / Finder.)")
+
+
 DEFAULT_KEEP = 3          # days a frame stays on a N.I.N.A. computer after it is filed (each computer its own)
 
 
@@ -90,9 +114,9 @@ def check_one(comp, idx, keep_days=None, now=None, progress=None, stop=None) -> 
     rep = {"name": comp.get("name") or comp.get("folder"), "folder": comp.get("folder"), "error": "",
            "safe": [], "keep": [], "bytes": 0}
     root = Path(comp.get("folder") or "")
-    if not str(root).strip() or not root.is_dir():
-        rep["error"] = (f"can't reach {root} - is the computer on, is the folder shared, and is the path right? "
-                        "(Try opening it in File Explorer / Finder.)")
+    why = reach(comp.get("folder"))
+    if why:
+        rep["error"] = why
         return rep
     files = []
     for dp, dns, fns in os.walk(root):
@@ -169,8 +193,22 @@ def check(computers, library, keep_days=None, now=None, progress=None, stop=None
     if not library:
         return [{"name": c.get("name") or c.get("folder"), "folder": c.get("folder"), "safe": [], "keep": [],
                  "bytes": 0, "error": "no organized library set (Organize › your library)"} for c in computers]
-    idx = library_index(library, progress=progress, stop=stop)
-    return [check_one(c, idx, keep_days, now, progress, stop) for c in computers]
+    try:
+        idx = library_index(library, progress=progress, stop=stop)
+    except OSError as e:
+        import win_signin as WS
+        why = f"your organized library can't be read ({WS.plain(e, library)})"
+        return [{"name": c.get("name") or c.get("folder"), "folder": c.get("folder"), "safe": [], "keep": [],
+                 "bytes": 0, "error": why} for c in computers]
+    out = []
+    for c in computers:            # one computer that can't be reached never stops the others
+        try:
+            out.append(check_one(c, idx, keep_days, now, progress, stop))
+        except OSError as e:
+            import win_signin as WS
+            out.append({"name": c.get("name") or c.get("folder"), "folder": c.get("folder"), "safe": [],
+                        "keep": [], "bytes": 0, "error": WS.plain(e, c.get("folder"))})
+    return out
 
 
 def _squeezed_size(p):
@@ -273,8 +311,9 @@ def old_frames(comp, days, idx=None, now=None, stop=None) -> dict:
     rep = {"name": comp.get("name") or comp.get("folder"), "folder": comp.get("folder"), "error": "", "files": [],
            "bytes": 0, "unfiled": 0}
     root = Path(comp.get("folder") or "")
-    if not str(root).strip() or not root.is_dir():
-        rep["error"] = f"can't reach {root}"
+    why = reach(comp.get("folder"))
+    if why:
+        rep["error"] = why
         return rep
     for dp, dns, fns in os.walk(root):
         if stop and stop():

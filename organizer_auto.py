@@ -27,6 +27,7 @@ TASK_NAME = "SubZeroAstro Auto-Organize"
 MAC_LABEL = "io.github.bapoteet.subzeroastro.autoorganize"
 SETTLE_MIN = 60            # a file changed in the last hour may still be arriving: it waits for the next run
 LOCK_STALE_H = 12
+AUTO_DUPS_MIN = 45        # at most this long comparing duplicates byte for byte; the rest next time
 AUTO_FETCH_MIN = 60       # Organize Automatically starts no new ASIAIR sub after this long; the rest come next time
 STATUS_EVERY_S = 3         # a running run says where it is at most this often (the windows look every few seconds)
 STATUS_QUIET_MIN = 60      # a run on another computer that hasn't said anything for this long has stopped
@@ -48,7 +49,8 @@ def load_config(settings=None) -> dict:
             "on": s.value("auto_org/on", False, type=bool),
             "jpgs": s.value("organize/delete_jpgs", True, type=bool),
             "empty": s.value("organize/delete_empty", False, type=bool),
-            "other": s.value("organize/delete_other", False, type=bool)}
+            "other": s.value("organize/delete_other", False, type=bool),
+            "dups": s.value("auto_org/delete_dups", False, type=bool)}
 
 
 def save_config(cfg, settings=None):
@@ -214,16 +216,35 @@ def run(cfg=None, settings=None, progress=None, now=None) -> dict:
                         _note(f"  {fl.get('src')}  -  {fl.get('error')}")
             except (OSError, ValueError):
                 rep["filed"] = len(todo)
+        if cfg.get("dups", False):        # you said so: exact twins of frames already in the library go
+            base_n = os.path.normcase(str(O.org_base(lib))) + os.sep
+            dups = [i for i in O.duplicates(items)
+                    if os.path.normcase(str(i.same_as)).startswith(base_n)]
+            if dups:
+                progress(f"Deleting {len(dups):,} exact duplicate(s) of frames in your library", force=True)
+                t_end = time.time() + AUTO_DUPS_MIN * 60
+                try:
+                    n_del, _kept, dlog = O.handle_duplicates(
+                        dups, lib, delete=True, leave_unlike=True, stop=lambda: time.time() > t_end,
+                        progress=lambda t, i, n: progress(f"Checking duplicates byte for byte: {i:,} of {n:,}",
+                                                          i, n))
+                    rep["dups"] = n_del
+                    if n_del:
+                        _note(f"deleted {n_del} exact duplicate(s) of frames already in the library "
+                              f"(list in {dlog})")
+                except OSError as e:
+                    _note(f"exact duplicates not deleted: {e}")
         unread = [i for i in items if i.status == "error"]
         if unread:
             _note(f"could not be read ({len(unread)}):")
             for i in unread[:40]:
                 _note(f"  {i.src}  -  {i.why}")
         for i in items:
-            if i.status == "move" or i.status == "here":
+            if i.status in ("move", "here", "handled"):
                 continue
             why = {"norig": "no rig matched - Your Rigs / Which Rig? in the Organize window",
-                   "duplicate": "duplicates - Step 2 in the Organize window",
+                   "duplicate": ("duplicates - Step 2 in the Organize window" if not cfg.get("dups") else
+                                 "duplicates that aren't exact copies - Step 2 in the Organize window"),
                    "error": "could not be read"}.get(i.status, i.why or i.status)
             rep["left"][why] = rep["left"].get(why, 0) + 1
         if settling:
@@ -237,7 +258,8 @@ def run(cfg=None, settings=None, progress=None, now=None) -> dict:
                     rep["nina"] = txt
                     _note(f"N.I.N.A. clean-up: {txt}")
             except Exception as e:  # noqa: BLE001
-                rep["nina"] = f"N.I.N.A. clean-up failed: {e}"
+                import win_signin as WS
+                rep["nina"] = f"N.I.N.A. clean-up failed: {WS.plain(e) if isinstance(e, OSError) else e}"
     except Exception as e:  # noqa: BLE001 - a scheduled run must report, never hang
         rep["error"] = str(e)
     finally:
@@ -446,6 +468,8 @@ def describe(rep) -> str:
         t += f", {rep['empty']} empty frame(s) deleted"
     if rep.get("jpgs"):
         t += f", {rep['jpgs']} .jpg preview(s) deleted"
+    if rep.get("dups"):
+        t += f", {rep['dups']} exact duplicate(s) deleted"
     if rep["left"]:
         t += "; left in the incoming folder: " + ", ".join(f"{n} {w}" for w, n in rep["left"].items())
     if rep.get("nina"):
@@ -460,7 +484,7 @@ def describe_html(rep) -> str:
         return escape(f"{rep['time']}: not run - {rep['error']}")
     head = f"{rep['time']}: {rep['filed']:,} file(s) filed"
     for k, what in (("other", "other file(s) deleted"), ("empty", "empty frame(s) deleted"),
-                    ("jpgs", ".jpg preview(s) deleted")):
+                    ("jpgs", ".jpg preview(s) deleted"), ("dups", "exact duplicate(s) deleted")):
         if rep.get(k):
             head += f", {rep[k]:,} {what}"
     lines = [escape(head)]
