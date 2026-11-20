@@ -5,9 +5,9 @@ import json
 import threading
 import time
 
-from PySide6.QtCore import QObject, QSettings, Qt, Signal
-from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout)
+from PySide6.QtCore import QObject, QPropertyAnimation, QSettings, Qt, QTimer, Signal
+from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGraphicsOpacityEffect,
+                               QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout)
 
 import prayers
 
@@ -186,30 +186,49 @@ class SendPrayerDialog(QDialog):
 
 
 class PrayerDialog(QDialog):
-    """The Weather Prayer of the day, with a link to send in your own."""
+    """The Weather Prayer of the day first, then the others in turn every ROTATE_S seconds (with back/next
+    arrows), and a link to send in your own."""
+
+    ROTATE_S = 30
 
     def __init__(self, parent, settings, app_version=""):
         super().__init__(parent)
         self.settings = settings
         self.app_version = app_version
         self.setWindowTitle("Weather Prayer")
-        self.setMinimumWidth(480)
-        p = todays_prayer(settings)
+        self.setMinimumWidth(520)
+        self.prayers = cached_list(settings) or [prayers.BUILT_IN]
+        today = todays_prayer(settings)
+        self.today_index = next((i for i, p in enumerate(self.prayers) if p is today or p == today), 0)
+        self.index = self.today_index
         lay = QVBoxLayout(self)
-        head = QLabel("<b>Today's Weather Prayer</b>")
-        lay.addWidget(head)
-        self.prayer_label = QLabel(p["text"])
+        top = QHBoxLayout()
+        self.head = QLabel()
+        top.addWidget(self.head)
+        top.addStretch(1)
+        self.prev_btn = QPushButton("\N{BLACK LEFT-POINTING TRIANGLE}")
+        self.next_btn = QPushButton("\N{BLACK RIGHT-POINTING TRIANGLE}")
+        for btn, tip, step in ((self.prev_btn, "Previous prayer", -1), (self.next_btn, "Next prayer", 1)):
+            btn.setFixedWidth(34)
+            btn.setToolTip(tip)
+            btn.setAutoDefault(False)
+            btn.clicked.connect(lambda _=False, d=step: self.step(d, by_hand=True))
+            btn.setVisible(len(self.prayers) > 1)
+            top.addWidget(btn)
+        lay.addLayout(top)
+        self.prayer_label = QLabel()
         self.prayer_label.setWordWrap(True)
         self.prayer_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.prayer_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         lay.addWidget(self.prayer_label)
-        self.by_label = QLabel(by_line(p))
+        self.by_label = QLabel()
         self.by_label.setAlignment(Qt.AlignRight)
         self.by_label.setStyleSheet("font-style:italic")
-        self.by_label.setVisible(bool(p.get("by")))
         lay.addWidget(self.by_label)
         row = QHBoxLayout()
         self.send_link = QPushButton("Send in your own Weather Prayer and see it here\N{HORIZONTAL ELLIPSIS}")
         self.send_link.setFlat(True)
+        self.send_link.setAutoDefault(False)
         self.send_link.setCursor(Qt.PointingHandCursor)
         self.send_link.setStyleSheet("color:#4a90d9; text-decoration:underline; text-align:left")
         self.send_link.clicked.connect(self.open_send)
@@ -221,6 +240,44 @@ class PrayerDialog(QDialog):
         row.addWidget(ok)
         lay.addLayout(row)
         self.send_dialog = None
+        # room for the longest prayer, so the box doesn't jump in size as they change
+        fm = self.prayer_label.fontMetrics()
+        self.prayer_label.setMinimumHeight(max(fm.boundingRect(0, 0, 480, 4000, Qt.TextWordWrap, p["text"]).height()
+                                               for p in self.prayers) + 4)
+        self.opacity = QGraphicsOpacityEffect(self.prayer_label)
+        self.opacity.setOpacity(1.0)
+        self.prayer_label.setGraphicsEffect(self.opacity)
+        self.fade = QPropertyAnimation(self.opacity, b"opacity", self)
+        self.fade.setDuration(450)
+        self.timer = QTimer(self)
+        self.timer.setInterval(self.ROTATE_S * 1000)
+        self.timer.timeout.connect(lambda: self.step(1))
+        self._show()
+        if len(self.prayers) > 1:
+            self.timer.start()
+
+    def _show(self):
+        p = self.prayers[self.index]
+        self.prayer_label.setText(p["text"])
+        self.by_label.setText(by_line(p))
+        self.by_label.setVisible(bool(p.get("by")))
+        n = len(self.prayers)
+        title = "Today's Weather Prayer" if self.index == self.today_index else "Weather Prayer"
+        self.head.setText(f"<b>{title}</b>" + (f" &nbsp;<span style='color:gray'>{self.index + 1} of {n}</span>"
+                                               if n > 1 else ""))
+
+    def step(self, d=1, by_hand=False):
+        """Show the next (d=1) or previous (d=-1) prayer, fading it in."""
+        if len(self.prayers) < 2:
+            return
+        self.index = (self.index + d) % len(self.prayers)
+        self._show()
+        self.fade.stop()
+        self.fade.setStartValue(0.0)
+        self.fade.setEndValue(1.0)
+        self.fade.start()
+        if by_hand:
+            self.timer.start()          # a full 30 s to read the one you picked
 
     def text(self) -> str:
         return self.prayer_label.text()

@@ -1970,6 +1970,14 @@ def run(app, out_dir: Path) -> int:
           and "Send in your own Weather Prayer and see it here" in _wp_box.send_link.text(),
           f"Help > Weather Prayer shows the downloaded prayer of the day with a link to send your own "
           f"({_wp_box.text()[:30]}... {_wp_box.by_label.text()})")
+    _wp_first = _wp_box.text()
+    _wp_box.step(1)
+    _wp_second = _wp_box.text()
+    _wp_box.step(-1, by_hand=True)
+    check(_wp_box.timer.isActive() and _wp_box.timer.interval() == 30000 and _wp_second != _wp_first
+          and _wp_box.text() == _wp_first and "of 3" in _wp_box.head.text() and _wp_box.next_btn.isVisibleTo(_wp_box),
+          f"Help > Weather Prayer starts on the prayer of the day, then shows the others in turn every 30 s, with "
+          f"back/next arrows ({_wp_second[:20]}... / {_wp_box.head.text()[-30:]})")
     _wp_sent = []
     _wp.submit_hook = lambda f: (_wp_sent.append(f) or True, "Amen! Your prayer is on its way.")
     w.settings.remove("prayers/last_sent")
