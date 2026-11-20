@@ -1,13 +1,16 @@
 name: Publish Weather Prayers
 
-# The approved Weather Prayers (prayers/prayers.json) are copied to the public downloads repo, where the app
-# (Help > Weather Prayer) and subzeroastro.com read them - so this repository can be private.
-# Runs when prayers/prayers.json changes on main, or by hand. Needs the secret DOWNLOADS_TOKEN.
+# The Weather Prayers list read by the app (Help > Weather Prayer) and subzeroastro.com lives in the public
+# downloads repo, so this repository can be private. It is made by prayers/build.py: Brian's list in
+# prayers/prayers.json, plus every prayer he ticked "Approved" in his Google Sheet (sheet_csv), checked every hour.
+# Only uploads when the list changed. Needs the secret DOWNLOADS_TOKEN.
 
 on:
   push:
     branches: [main]
-    paths: [prayers/prayers.json]
+    paths: [prayers/**]
+  schedule:
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -15,14 +18,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Copy prayers.json to the downloads repo
+      - name: Make the list and copy it to the downloads repo if it changed
         env:
           GH_TOKEN: ${{ secrets.DOWNLOADS_TOKEN }}
           DL_REPO: ${{ vars.DOWNLOADS_REPO || 'HowlingStarProjects/SubZeroAstro-Downloads' }}
         run: |
           if [ -z "$GH_TOKEN" ]; then echo "::error::DOWNLOADS_TOKEN is not set"; exit 1; fi
-          python3 -c "import json;d=json.load(open('prayers/prayers.json',encoding='utf-8'));assert all(p.get('text') for p in d['prayers']);print(len(d['prayers']),'prayers')"
-          SHA=$(gh api "repos/$DL_REPO/contents/prayers.json" --jq .sha 2>/dev/null || true)
-          ARGS=(-f message="Weather Prayers: $(git log -1 --format=%s)" -f content="$(base64 -w0 prayers/prayers.json)")
+          python3 prayers/build.py /tmp/prayers.json || { [ $? -eq 3 ] && exit 0; exit 1; }
+          python3 -c "import json;d=json.load(open('/tmp/prayers.json',encoding='utf-8'));assert all(p.get('text') for p in d['prayers'])"
+          OLD=$(gh api "repos/$DL_REPO/contents/prayers.json" 2>/dev/null || true)
+          SHA=$(echo "$OLD" | python3 -c "import sys,json;print(json.load(sys.stdin).get('sha',''))" 2>/dev/null || true)
+          if [ -n "$SHA" ] && echo "$OLD" | python3 -c "import sys,json,base64;d=json.load(sys.stdin);sys.exit(0 if base64.b64decode(d['content'])==open('/tmp/prayers.json','rb').read() else 1)"; then
+            echo "No change"; exit 0; fi
+          ARGS=(-f message="Weather Prayers: $(git log -1 --format=%s) / approved sheet" -f content="$(base64 -w0 /tmp/prayers.json)")
           [ -n "$SHA" ] && ARGS+=(-f sha="$SHA")
           gh api -X PUT "repos/$DL_REPO/contents/prayers.json" "${ARGS[@]}" --jq .commit.html_url
