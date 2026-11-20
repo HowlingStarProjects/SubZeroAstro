@@ -4,6 +4,9 @@ Desktop astrophotography app (Python 3.13 + PySide6, NumPy) for Windows and Appl
 for **Howling Star Projects, LLC** (DBA SubZeroAstro). Repository: HowlingStarProjects/SubZeroAstro (moved from
 bapoteet/SubZeroAstro on 2026-11-17; the old address forwards).
 
+**Read `docs/PROJECT_HISTORY.md` at the start of every session** - it has the background, decisions and the user's
+setup from the first long conversation in which the app was built.
+
 ## Every change is released
 1. Bump `APP_VERSION` in `subzeroastro.py` ("0.9.NNN beta").
 2. Rebuild the manual in two passes (page numbers in the index):
