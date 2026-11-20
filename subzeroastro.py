@@ -46,7 +46,7 @@ from chart import ChartPoint, SessionChart, filter_color
 
 APP_NAME = "SubZeroAstro"
 APP_TAGLINE = "From subs to masters - zero hassle."
-APP_VERSION = "0.9.299 beta"
+APP_VERSION = "0.9.300 beta"
 ORGANIZER_ENABLED = True       # File › Organize My Astro Files…
 ui_header.APP_VERSION = APP_VERSION       # shown in small print under the name on every page
 APP_AUTHOR = "Brian A. Poteet, DVM"
@@ -988,6 +988,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(3000, self.cleanup_checkpoints)
         if "--selftest" not in sys.argv:             # automatic organizing: still starting this copy of the app?
             QTimer.singleShot(6000, lambda: threading.Thread(target=self._keep_schedule, daemon=True).start())
+            QTimer.singleShot(9000, self.refresh_prayers)          # Weather Prayer of the day: the approved list
         self.profile_timer = QTimer(self)                      # My Profile: in step with the other computers
         self.profile_timer.setInterval(self.profile_syncer.EVERY_S * 1000)
         self.profile_timer.timeout.connect(lambda: self.profile_syncer.start(force=True))
@@ -3840,15 +3841,29 @@ class MainWindow(QMainWindow):
     JOKES = {
         "clouds": ("Make Clouds Disappear", "Clear skies, on demand!\n\nComing soon... Not! \N{CLOUD}"),
         "bortle": ("Make My Bortle Better", "Darker skies, one click away!\n\nComing soon... Not! \N{CITYSCAPE AT DUSK}"),
-        "prayer": ("Weather Prayer",
-                   "Dear God, I have been really good and my astro equipment is ready to go. Please bless me and "
-                   "all other astrophotographers with clear dark skies, good seeing and minimal moonlight for "
-                   "tonight.  If you could also throw in some anti-Murphy's Law pixie dust and maybe a cold beer, "
-                   "that would be great and would let me know you really care about me.  Amen."),
     }
+
+    def refresh_prayers(self, force=False):
+        """Download the approved Weather Prayers in the background (twice a day at most)."""
+        import prayer_window
+        threading.Thread(target=lambda: prayer_window.refresh_list(QSettings("FITSBlasterWin", "FITSBlasterWin"),
+                                                                     force), daemon=True).start()
+
+    def show_prayer(self):
+        """Help > Weather Prayer: the prayer of the day, and a link to send in your own."""
+        import prayer_window
+        box = prayer_window.PrayerDialog(self, self.settings, APP_VERSION)
+        box.setAttribute(Qt.WA_DeleteOnClose)
+        box.open()
+        self._joke_box = box
+        if "--selftest" not in sys.argv:
+            self.refresh_prayers()
+        return box
 
     def show_joke(self, key):
         """Just for fun: a light-hearted 'Coming soon... Not!' for the wishes no app can grant."""
+        if key == "prayer":
+            return self.show_prayer()
         title, text = self.JOKES[key]
         box = QMessageBox(QMessageBox.Information, title, text, QMessageBox.Ok, self)
         box.setAttribute(Qt.WA_DeleteOnClose)

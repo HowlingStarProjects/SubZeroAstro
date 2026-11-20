@@ -1,0 +1,28 @@
+name: Publish Weather Prayers
+
+# The approved Weather Prayers (prayers/prayers.json) are copied to the public downloads repo, where the app
+# (Help > Weather Prayer) and subzeroastro.com read them - so this repository can be private.
+# Runs when prayers/prayers.json changes on main, or by hand. Needs the secret DOWNLOADS_TOKEN.
+
+on:
+  push:
+    branches: [main]
+    paths: [prayers/prayers.json]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy prayers.json to the downloads repo
+        env:
+          GH_TOKEN: ${{ secrets.DOWNLOADS_TOKEN }}
+          DL_REPO: ${{ vars.DOWNLOADS_REPO || 'HowlingStarProjects/SubZeroAstro-Downloads' }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::error::DOWNLOADS_TOKEN is not set"; exit 1; fi
+          python3 -c "import json;d=json.load(open('prayers/prayers.json',encoding='utf-8'));assert all(p.get('text') for p in d['prayers']);print(len(d['prayers']),'prayers')"
+          SHA=$(gh api "repos/$DL_REPO/contents/prayers.json" --jq .sha 2>/dev/null || true)
+          ARGS=(-f message="Weather Prayers: $(git log -1 --format=%s)" -f content="$(base64 -w0 prayers/prayers.json)")
+          [ -n "$SHA" ] && ARGS+=(-f sha="$SHA")
+          gh api -X PUT "repos/$DL_REPO/contents/prayers.json" "${ARGS[@]}" --jq .commit.html_url

@@ -1941,6 +1941,95 @@ def run(app, out_dir: Path) -> int:
             QApplication.processEvents()
     check("Weather Prayer" in _jk_texts and _jk_pr_msg.startswith("Dear God, I have been really good")
           and _jk_pr_msg.endswith("Amen."), f"Help > Weather Prayer shows the prayer ({_jk_pr_msg[:40]}...)")
+    # Weather Prayers sent in by users: approved list, prayer of the day, sending one in
+    import datetime as _wp_dt
+    import prayers as _wp
+    import prayer_window as _wpw
+    _wp_keys = ("prayers/list", "prayers/fetched", "prayers/last_sent")
+    _wp_saved = {k: w.settings.value(k) for k in _wp_keys}
+    _wp_list = [{"text": "Dear God, no clouds tonight please, Amen.", "by": "Dave, Texas"},
+                {"text": "Lord, let the guiding star stay round.", "by": ""}, "Just a plain string prayer, Amen.",
+                {"by": "nobody"}, 42]
+    _wp_clean = _wp.clean_list({"prayers": _wp_list})
+    check(len(_wp_clean) == 3 and _wp_clean[2]["text"].startswith("Just a plain"),
+          f"Weather Prayers: the approved list keeps good prayers and skips junk ({len(_wp_clean)})")
+    _wp_d0 = _wp.EPOCH
+    _wp_seq = [_wp.prayer_of_the_day(_wp_clean, _wp_d0 + _wp_dt.timedelta(days=_wp_i))["text"][:10]
+               for _wp_i in range(7)]
+    check(_wp_seq[0] == _wp_seq[1] and _wp_seq[1] != _wp_seq[2] and _wp_seq[2] == _wp_seq[3]
+          and _wp_seq[4] != _wp_seq[3] and _wp_seq[6] == _wp_seq[0]
+          and _wp.prayer_of_the_day([])["text"] == _wp.BUILT_IN["text"],
+          f"Weather Prayers: a new prayer of the day every two days, in turn ({_wp_seq})")
+    _wp.fetch_hook = lambda: {"prayers": _wp_list}
+    _wp_new = _wpw.refresh_list(w.settings, force=True)
+    _wp_today = _wp.prayer_of_the_day(_wp_clean)
+    _wp_box = w.show_joke("prayer")
+    QApplication.processEvents()
+    check(_wp_new and len(_wpw.cached_list(w.settings)) == 3 and _wp_box.text() == _wp_today["text"]
+          and _wp_box.by_label.text() == _wpw.by_line(_wp_today)
+          and "Send in your own Weather Prayer and see it here" in _wp_box.send_link.text(),
+          f"Help > Weather Prayer shows the downloaded prayer of the day with a link to send your own "
+          f"({_wp_box.text()[:30]}... {_wp_box.by_label.text()})")
+    _wp_sent = []
+    _wp.submit_hook = lambda f: (_wp_sent.append(f) or True, "Amen! Your prayer is on its way.")
+    w.settings.remove("prayers/last_sent")
+    _wp_sd = _wp_box.open_send()
+    QApplication.processEvents()
+    _wp_sd.text.setPlainText("Hi")
+    _wp_sd.send()
+    _wp_short = _wp_sd.status.text()
+    _wp_sd.text.setPlainText("Dear God, please keep the dew off my corrector plate tonight. Amen.")
+    _wp_sd.name.setText("Dave")
+    _wp_sd.place.setText("Texas")
+    _wp_sd.send()
+    _wp_t0 = time.time()
+    while not _wp_sent or not hasattr(_wp_sd, "last_result"):
+        QApplication.processEvents()
+        if time.time() - _wp_t0 > 10:
+            break
+        time.sleep(0.02)
+    QApplication.processEvents()
+    _wp_f = _wp_sent[0] if _wp_sent else {}
+    check("few more words" in _wp_short and getattr(_wp_sd, "last_result", (False,))[0]
+          and _wp_f.get("prayer", "").startswith("Dear God, please keep the dew") and _wp_f.get("name") == "Dave"
+          and _wp_f.get("place") == "Texas" and _wp_f.get("ok_to_show") == "Yes"
+          and _wp_f.get("sent_from", "").startswith("SubZeroAstro"),
+          f"Weather Prayers: a too-short prayer is refused, a real one is sent to Brian with name and place "
+          f"({_wp_short[:30]} / {_wp_f})")
+    _wp_sd.text.setReadOnly(False)
+    _wp_sd.send()
+    check(len(_wp_sent) == 1 and "Please wait" in _wp_sd.status.text(),
+          f"Weather Prayers: a second prayer straight away is asked to wait ({_wp_sd.status.text()[:40]})")
+    _wp.submit_hook = None
+
+    def _wp_offline():
+        raise OSError("offline")
+    _wp.fetch_hook = _wp_offline
+    _wp_sd2 = _wp_box.open_send()
+    _wp_off = (not _wp_sd2.send_btn.isEnabled() and "isn't switched on" in _wp_sd2.status.text())
+    _wp_sd2.close()
+    QApplication.processEvents()
+    _wp_form = "https://docs.google.com/forms/d/e/1FAIpQLSdTEST/formResponse"
+    _wp.fetch_hook = lambda: {"prayers": _wp_list, "send": {"form": _wp_form, "fields": {
+        "prayer": "entry.111", "name": "entry.222", "bogus": "entry.9", "place": "x"}}}
+    _wpw.refresh_list(w.settings, force=True)
+    _wp_setup = _wpw.send_setup(w.settings)
+    _wp_bad = _wp.clean_send({"send": {"form": "https://evil.example/formResponse", "fields": {"prayer": "entry.1"}}})
+    _wp_sd2 = _wp_box.open_send()
+    check(_wp_off and _wp_setup == {"form": _wp_form, "fields": {"prayer": "entry.111", "name": "entry.222"}}
+          and _wp_bad is None and _wp_sd2.send_btn.isEnabled() and "isn't switched on" not in _wp_sd2.status.text(),
+          f"Weather Prayers: sending is off until the approved list names Brian's Google Form, then on "
+          f"({_wp_off}, {_wp_setup})")
+    for _wp_x in (_wp_sd2, _wp_sd, _wp_box):
+        if _wp_x is not None:
+            _wp_x.close()
+    QApplication.processEvents()
+    _wp.fetch_hook = None
+    for _wp_k, _wp_v in _wp_saved.items():
+        if _wp_v is None:
+            w.settings.remove(_wp_k)
+        else:
+            w.settings.setValue(_wp_k, _wp_v)
     check("Make Clouds Disappear" in _jk_texts and "Make My Bortle Better" in _jk_texts
           and len(_jk_msgs) == 2 and all("Coming soon... Not!" in _jk_t for _jk_t in _jk_msgs),
           f"Help > Make Clouds Disappear / Make My Bortle Better answer 'Coming soon... Not!' ({_jk_msgs})")
