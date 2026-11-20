@@ -2285,6 +2285,35 @@ def run(app, out_dir: Path) -> int:
             w.settings.setValue(k, v)
         w.settings.setValue(_tc.BANNER_OFF, _old_off)
         bn.hide()
+        # --- Licence Agreement: I Accept / Quit on the first start and when it changes, on its own settings file ---
+        import eula as _eu
+        from PySide6.QtCore import QSettings as _euQS
+        _eud = session.parent / "eula"
+        _eud.mkdir(parents=True, exist_ok=True)
+        _eus = _euQS(str(_eud / "settings.ini"), _euQS.IniFormat)
+        _eus.clear()
+        check(_eu.needs_acceptance(_eus), "a new install is asked to accept the Licence Agreement")
+        _eudlg = _eu.EulaDialog(None, ask=True)
+        _eutxt = _eudlg.text.toPlainText()
+        check(not _eudlg.btn_accept.isEnabled() and _eudlg.btn_quit.text() == "Quit"
+              and "AS IS" in _eutxt and "back up" in _eutxt.lower() and "Texas" in _eutxt
+              and len(_eu.SUMMARY) == 4,
+              "the Licence Agreement shows the short version and the full text, with I Accept (after ticking "
+              "'I have read') and Quit")
+        _eudlg.chk.setChecked(True)
+        check(_eudlg.btn_accept.isEnabled(), "ticking 'I have read the agreement' turns on I Accept")
+        fits_small(_eudlg, "Licence Agreement")
+        shot("01e_licence_agreement.png", _eudlg)
+        _eudlg.close()
+        _eu.record_acceptance(_eus)
+        check(not _eu.needs_acceptance(_eus) and _eus.value(_eu.KEY_WHEN, ""),
+              "once accepted, the Licence Agreement isn't asked again")
+        _eus.setValue(_eu.KEY_VERSION, "0.1-old")
+        check(_eu.needs_acceptance(_eus), "a changed Licence Agreement is asked again")
+        check(hasattr(w, "act_eula") and any(a is w.act_eula for m_ in w.menuBar().actions() if m_.menu()
+                                             for a in m_.menu().actions()),
+              "Help › Licence Agreement shows the agreement any time")
+        _eus.clear()
         # --- Set Up SubZeroAstro (first-run wizard), on its own settings file so nothing real changes ---
         import setup_wizard as _sw
         from PySide6.QtCore import QSettings as _swQS

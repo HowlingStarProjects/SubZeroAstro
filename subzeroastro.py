@@ -46,7 +46,7 @@ from chart import ChartPoint, SessionChart, filter_color
 
 APP_NAME = "SubZeroAstro"
 APP_TAGLINE = "From subs to masters - zero hassle."
-APP_VERSION = "0.9.301 beta"
+APP_VERSION = "0.9.302 beta"
 ORGANIZER_ENABLED = True       # File › Organize My Astro Files…
 ui_header.APP_VERSION = APP_VERSION       # shown in small print under the name on every page
 APP_AUTHOR = "Brian A. Poteet, DVM"
@@ -1612,6 +1612,11 @@ class MainWindow(QMainWindow):
         a = QAction("About", self)
         a.triggered.connect(self.show_about)
         m.addAction(a)
+        a = QAction("Licence Agreement", self)
+        a.setToolTip("Read the SubZeroAstro Licence Agreement you accepted")
+        a.triggered.connect(lambda: __import__("eula").show(self))
+        m.addAction(a)
+        self.act_eula = a
         a = QAction("Play the Intro Animation", self)
         a.triggered.connect(self.play_splash)
         m.addAction(a)
@@ -3881,7 +3886,8 @@ class MainWindow(QMainWindow):
             "New versions install themselves: <i>Help › Check for Updates…</i> (or the blue bar on page 1).<br>"
             f"<small>Installed in: {_install_place()}</small><br><br>"
             f"© 2026 {APP_AUTHOR}. Created by {APP_AUTHOR}, built with Claude (Anthropic).<br>"
-            "Free software under the MIT License. Provided as is, with no warranty.<br><br>"
+            "Use of this version is covered by the SubZeroAstro Licence Agreement (<i>Help › Licence Agreement</i>). "
+            "Provided as is, with no warranty. Versions up to 0.9.301 were released under the MIT License.<br><br>"
             "The culling view was inspired by FITS Blaster for macOS by Tom van Peer "
             "(<a href='https://astrophoto-app.com/'>astrophoto-app.com</a>)."))
 
@@ -3966,6 +3972,12 @@ def main():
             return False
     fo = _FileOpen()
     app.installEventFilter(fo)
+    if fast_cli is None:
+        # the Licence Agreement: on the first start and whenever it changes, I Accept or Quit (N.I.N.A.'s unattended
+        # Fast Track start is never held up by it)
+        import eula
+        if not eula.ask_if_needed(QSettings("FITSBlasterWin", "FITSBlasterWin")):
+            sys.exit(0)
     files = file_viewer.viewer_files(sys.argv[1:])
     if not files and sys.platform == "darwin" and len(sys.argv) <= 1:
         t_end = time.time() + 0.6                     # a double-click in Finder: its file arrives right away
