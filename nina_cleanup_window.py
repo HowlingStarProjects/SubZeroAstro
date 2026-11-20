@@ -28,7 +28,8 @@ class NinaCleanupDialog(QDialog):
             "(same name, size and contents) - copied <i>and</i> organized. Everything else stays, with the reason. "
             "Nothing is deleted until you have seen the check and press Delete.<br>Share each computer's image "
             "folder on your network (with permission to change files) and add it here, e.g. "
-            "<code>\\\\EAGLE1\\NINA Images</code>.")
+            "<code>\\\\EAGLE1\\NINA Images</code>. If that computer asks for a password, pick it and press "
+            "<b>Sign In…</b> once - the automatic run then gets in by itself.")
         intro.setWordWrap(True)
         intro.setTextFormat(Qt.RichText)
         lay.addWidget(intro)
@@ -41,7 +42,7 @@ class NinaCleanupDialog(QDialog):
         lay.addWidget(self.table, 1)
         h = QHBoxLayout()
         for text, fn in (("Add Computer", lambda: self.add_row()), ("Remove", self.remove_row),
-                         ("Browse for Folder…", self.browse_row),
+                         ("Browse for Folder…", self.browse_row), ("Sign In…", lambda: self.sign_in()),
                          ("Delete Old Frames on This Computer…", lambda: self.delete_old())):
             b = QPushButton(text)
             b.clicked.connect(fn)
@@ -124,6 +125,63 @@ class NinaCleanupDialog(QDialog):
         d = QFileDialog.getExistingDirectory(self, "The N.I.N.A. computer's shared image folder")
         if d:
             self.table.item(r, 1).setText(d)
+
+    def sign_in(self, row=None, user=None, password=None):
+        """Sign In…: the user name and password of the selected N.I.N.A. computer, tried at once and kept in
+        Windows' Credential Manager - so the automatic run (no one at the keyboard) gets in too. user/password
+        stand in for the questions in the self-test. Returns (ok, message)."""
+        import win_signin as WS
+        comps = self.computers()
+        r = self.table.currentRow() if row is None else row
+        if not comps:
+            QMessageBox.information(self, self.windowTitle(), "Add a N.I.N.A. computer's shared image folder first.")
+            return None
+        comp = comps[r if 0 <= r < len(comps) else 0]
+        if user is None:
+            from PySide6.QtWidgets import QDialogButtonBox, QFormLayout, QLineEdit
+            d = QDialog(self)
+            d.setWindowTitle(f"Sign in to {comp['name']}")
+            v = QVBoxLayout(d)
+            host = WS.unc_parts(comp["folder"])[0] or comp["folder"]
+            info = QLabel(f"The user name and password you use to sign in to <b>{comp['name']}</b> ({host}) "
+                          "itself - for a PrimaLuceLab Eagle that is usually <b>PrimaLuceLab</b> and its Windows "
+                          "password. They are tried right away and kept in Windows' Credential Manager (not in "
+                          "SubZeroAstro), so the morning's automatic run can get in by itself.<br><br>If that "
+                          "account has no password, Windows won't let it in over the network: give it one on that "
+                          "computer first (Settings › Accounts › Sign-in options › Password).")
+            info.setWordWrap(True)
+            info.setTextFormat(Qt.RichText)
+            v.addWidget(info)
+            f = QFormLayout()
+            ed_u = QLineEdit(WS.saved_user(comp["folder"]) or WS.guess_user(comp["folder"]))
+            ed_p = QLineEdit()
+            ed_p.setEchoMode(QLineEdit.Password)
+            f.addRow("User name:", ed_u)
+            f.addRow("Password:", ed_p)
+            v.addLayout(f)
+            bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            bb.button(QDialogButtonBox.Ok).setText("Sign In")
+            bb.accepted.connect(d.accept)
+            bb.rejected.connect(d.reject)
+            v.addWidget(bb)
+            (ed_p if ed_u.text() else ed_u).setFocus()
+            d.resize(520, 0)
+            if d.exec() != QDialog.Accepted:
+                return None
+            user, password = ed_u.text().strip(), ed_p.text()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            ok, msg = WS.sign_in(comp["folder"], user, password or "")
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.status.setText(f"<b>{comp['name']}</b>: {msg}")
+        try:
+            import session_log as _sl          # never the password
+            _sl.write("nina clean-up", f"sign in to {WS.unc_parts(comp['folder'])[0]} as {user}: "
+                                       f"{'ok' if ok else 'not signed in'}")
+        except Exception:  # noqa: BLE001
+            pass
+        return ok, msg
 
     def computers(self) -> list:
         out = []

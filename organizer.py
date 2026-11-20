@@ -1048,10 +1048,15 @@ SAFE_MOVED = ("the same frame but not the same file (one copy was probably edite
               "instead of deleted; Undo Last Run puts it back")
 
 
-def handle_duplicates(dups, library, delete=False, progress=None, stop=None):
+NOT_IDENTICAL_LEFT = "the same frame but not byte for byte the same file - left where it is (Step 2 deals with it)"
+
+
+def handle_duplicates(dups, library, delete=False, progress=None, stop=None, leave_unlike=False):
     """Deal with the duplicates the user ticked. delete=False moves them into <library>/Duplicates (undo with
     Undo Last Run); delete=True deletes each one - but only when it is byte for byte the same as the copy that
-    is kept, which must still be there. Returns (done, kept_back, log_path); kept_back = [(Item, reason)]."""
+    is kept, which must still be there. Returns (done, kept_back, log_path); kept_back = [(Item, reason)].
+    leave_unlike (with delete): one that is not byte for byte the same stays where it is instead of going into
+    the Duplicates folder (Organize Automatically)."""
     library = Path(library)
     logd = org_base(library) / LOG_DIR
     logd.mkdir(parents=True, exist_ok=True)
@@ -1078,6 +1083,9 @@ def handle_duplicates(dups, library, delete=False, progress=None, stop=None):
         # the same frame (same capture time, target, filter) whose file differs, e.g. one copy had its header
         # edited - goes into the Duplicates folder, where Undo Last Run can put it back
         to_dups = not delete or not same_bytes(it.src, it.same_as)
+        if to_dups and delete and leave_unlike:      # the automatic run: only exact twins go, the rest stay put
+            kept_back.append((it, NOT_IDENTICAL_LEFT))
+            continue
         try:
             if not to_dups:
                 it.src.unlink()

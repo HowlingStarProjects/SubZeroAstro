@@ -1607,6 +1607,14 @@ class AutoDialog(QDialog):
                              "hour after your morning copy to the NAS")
         form.addRow("At:", self.time)
         lay.addLayout(form)
+        self.del_dups = QCheckBox("Delete exact duplicates of frames already in my library (byte for byte the same "
+                                  "file - your library's copy stays)")
+        self.del_dups.setToolTip("Frames N.I.N.A. copies again on later nights pile up in the incoming folder. "
+                                 "With this ticked, each run deletes the ones that are exactly the same file as "
+                                 "one already filed; anything that only looks the same is left for Step 2.")
+        self.del_dups.setChecked(cfg.get("dups", False))
+        self.del_dups.toggled.connect(lambda on: self.settings.setValue("auto_org/delete_dups", bool(on)))
+        lay.addWidget(self.del_dups)
         self.note = QLabel("")
         self.note.setWordWrap(True)
         lay.addWidget(self.note)
