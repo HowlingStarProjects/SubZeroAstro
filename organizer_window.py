@@ -186,6 +186,16 @@ class OrganizeDialog(QDialog):
         self.b_safe.clicked.connect(lambda: self.safe_to_delete())
         self.b_undo = QPushButton("Undo Last Run…")
         self.b_undo.clicked.connect(lambda: self.undo_last())
+        self.b_skipped = QPushButton("Skipped Folders…")
+        self.b_skipped.setEnabled(False)
+        self.b_skipped.setToolTip("The folders Step 1 did not look into on purpose (saved projects, PixInsight / "
+                                  "Siril work folders, hidden folders, the NAS's recycle bin) - where each one is, "
+                                  "and why, with a button that opens it")
+        self.b_skipped.clicked.connect(lambda: self.show_skipped())
+        self.b_dupdir = QPushButton("Open Duplicates Folder")
+        self.b_dupdir.setToolTip("Opens the folder where duplicates you set aside (Step 2 - Move to a Duplicates "
+                                 "Folder) wait. Delete what's in it whenever you like.")
+        self.b_dupdir.clicked.connect(lambda: self.open_dup_folder())
         self.b_stop = QPushButton("Stop")
         self.b_stop.setVisible(False)
         self.b_stop.clicked.connect(lambda: setattr(self.job, "stop", True) if self.job else None)
@@ -195,7 +205,7 @@ class OrganizeDialog(QDialog):
                                   "the folder now (e.g. after new subs came in). Nothing is moved.")
         self.b_refresh.clicked.connect(lambda: self.refresh())
         for b in (self.b_rigs, self.b_scan, self.b_which, self.b_dups, self.b_go, self.b_safe, self.b_undo,
-                  self.b_refresh, self.b_stop):
+                  self.b_skipped, self.b_dupdir, self.b_refresh, self.b_stop):
             h.addWidget(b)
         h.addStretch(1)
         lay.addLayout(h)
@@ -593,6 +603,55 @@ class OrganizeDialog(QDialog):
             QApplication.clipboard().setText(text)
         return text
 
+    # ---------------------------------------------------------------- skipped folders / Duplicates folder
+    @staticmethod
+    def _esc(t):
+        import html as _h
+        return _h.escape(str(t))
+
+    def _skipped_text(self):
+        """The skipped folders, each with its full place and why (the first few), for the summary."""
+        rows = "".join(f"<br>&nbsp;&nbsp;• <b>{self._esc(Path(p))}</b> - {self._esc(w)}" for p, w in O.SKIPPED[:4])
+        more = f"<br>&nbsp;&nbsp;… and {len(O.SKIPPED) - 4} more" if len(O.SKIPPED) > 4 else ""
+        return (":" + rows + more + "<br>&nbsp;&nbsp;(press <b>Skipped Folders…</b> to open them or copy the list)")
+
+    def show_skipped(self, wait=False):
+        """Skipped Folders…: where each folder Step 1 left alone is, and why - Open Folder and Copy List."""
+        d = SkippedDialog(list(O.SKIPPED), self)
+        self._skipped_dlg = d
+        if wait:
+            d.show()
+        else:
+            d.exec()
+        return d
+
+    def dup_folder(self) -> Path:
+        """Where duplicates set aside go: <library>/Organized Astro Files/Duplicates."""
+        return O.org_base(self.library()) / O.DUP_DIR
+
+    def open_dup_folder(self, ask=True):
+        import tools as _tl
+        d = self.dup_folder()
+        if not str(self.library()).strip() or str(self.library()) == ".":
+            if ask:
+                QMessageBox.information(self, "Open Duplicates Folder",
+                                        "Pick the folder to put the organized files in first - the Duplicates "
+                                        "folder is inside it.")
+            return False
+        try:
+            there = d.is_dir()
+        except OSError:
+            there = False
+        if not there:
+            if ask:
+                QMessageBox.information(self, "Open Duplicates Folder",
+                                        "There is no Duplicates folder yet - nothing has been set aside.\n\n"
+                                        f"When you press Move to a Duplicates Folder in Step 2, they go to:\n{d}")
+            return False
+        if ask and not _tl.reveal(d):
+            QMessageBox.information(self, "Open Duplicates Folder", f"Could not open {d}")
+        return True
+
     def _table_menu(self, pos):
         from PySide6.QtWidgets import QMenu
         import tools as _tl
@@ -648,8 +707,8 @@ class OrganizeDialog(QDialog):
                          + ("<br>&nbsp;&nbsp;(right-click the list to copy their names or open their folder)"
                             if where else ""))
         if O.SKIPPED:
-            parts.append(f"{len(O.SKIPPED)} folder(s) not looked into on purpose (saved projects, PixInsight/Siril "
-                         "work folders, hidden folders) - their files stay where they are")
+            parts.append(f"{len(O.SKIPPED)} folder(s) not looked into on purpose - their files stay where they are"
+                         + self._skipped_text())
         tail = ("<br>Check the list, deal with any duplicates (<b>Step 2</b>), then press <b>Step 3 – Organize</b>."
                 if sm["files"] else
                 "<br><b>Nothing new to organize here</b> - every frame in these folders is already in your library "
@@ -681,6 +740,7 @@ class OrganizeDialog(QDialog):
                 self.table.setItem(r, c, cell)
         self.b_go.setEnabled(self._has_work(items))
         self.b_dups.setEnabled(bool(O.duplicates(items)))
+        self.b_skipped.setEnabled(bool(O.SKIPPED))
         issues = O.rig_issues(items, (getattr(self, "_plan_args", None) or (None, None, None))[2])
         self.b_which.setEnabled(bool(issues))
         if issues:
@@ -767,9 +827,8 @@ class OrganizeDialog(QDialog):
                 msg.append(f"<b>{nleft} file(s) were left where they are</b> - listed below with the reason: "
                            + "; ".join(parts) + ".")
             if O.SKIPPED:
-                msg.append(f"{len(O.SKIPPED)} folder(s) were not looked into on purpose: "
-                           + "; ".join(f"{Path(p).name} ({w})" for p, w in O.SKIPPED[:4])
-                           + (" …" if len(O.SKIPPED) > 4 else ""))
+                msg.append(f"{len(O.SKIPPED)} folder(s) were not looked into on purpose - their files stay where "
+                           "they are" + self._skipped_text())
             self.status.setText("<br>".join(msg))
             left_dups = O.duplicates(self.items) if move else []
             self.items = []
@@ -874,6 +933,9 @@ class OrganizeDialog(QDialog):
             if not delete or safe:
                 self.last_log = log
             msg = (f"{n} duplicate(s) {'deleted' if delete else f'moved to the {O.DUP_DIR} folder (Undo Last Run puts them back)'}.")
+            if not delete or safe:
+                msg += (f" The {O.DUP_DIR} folder is <b>{self._esc(self.dup_folder())}</b> - press <b>Open Duplicates "
+                        "Folder</b> to see it; delete what's in it whenever you like.")
             if safe:
                 msg += (f" {len(safe)} were the same frame but not the same file (one copy was probably edited, "
                         f"e.g. its header) - moved to the {O.DUP_DIR} folder instead (Undo Last Run puts them back).")
@@ -1155,6 +1217,73 @@ class OrganizeDialog(QDialog):
         self._show_plan(items)
 
 
+class SkippedDialog(QDialog):
+    """The folders Step 1 did not look into on purpose: where each one is and why, Open Folder, Copy List."""
+
+    def __init__(self, skipped, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Skipped Folders")
+        self.skipped = [(Path(p), w) for p, w in skipped]
+        lay = QVBoxLayout(self)
+        lab = QLabel("These folders were not looked into on purpose - their files stay where they are. Saved "
+                     "projects and PixInsight / Siril work folders hold copies you made while processing; the NAS's "
+                     "recycle bin holds files you deleted. Open one to look, and delete it yourself if you no longer "
+                     "need it - SubZeroAstro never deletes them." if self.skipped else
+                     "Every folder was looked into - none was skipped.")
+        lab.setWordWrap(True)
+        lay.addWidget(lab)
+        self.table = QTableWidget(len(self.skipped), 2)
+        self.table.setHorizontalHeaderLabels(["Folder", "Why it was skipped"])
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        hh = self.table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.Interactive)
+        hh.setStretchLastSection(True)
+        self.table.setColumnWidth(0, 460)
+        for r, (p, w) in enumerate(self.skipped):
+            self.table.setItem(r, 0, QTableWidgetItem(str(p)))
+            self.table.setItem(r, 1, QTableWidgetItem(w))
+        if self.skipped:
+            self.table.selectRow(0)
+        self.table.doubleClicked.connect(lambda _ix: self.open_selected())
+        lay.addWidget(self.table, 1)
+        h = QHBoxLayout()
+        self.b_open = QPushButton("Open Folder")
+        self.b_open.setEnabled(bool(self.skipped))
+        self.b_open.clicked.connect(lambda: self.open_selected())
+        self.b_copy = QPushButton("Copy List")
+        self.b_copy.setToolTip("Copies every folder's place and why, to paste into an email or a note")
+        self.b_copy.setEnabled(bool(self.skipped))
+        self.b_copy.clicked.connect(lambda: self.copy_list())
+        b_close = QPushButton("Close")
+        b_close.clicked.connect(self.close)
+        h.addWidget(self.b_open)
+        h.addWidget(self.b_copy)
+        h.addStretch(1)
+        h.addWidget(b_close)
+        lay.addLayout(h)
+        self.resize(820, 340)
+
+    def selected(self):
+        rows = sorted({ix.row() for ix in self.table.selectedIndexes()})
+        return self.skipped[rows[0]][0] if rows else (self.skipped[0][0] if self.skipped else None)
+
+    def open_selected(self, really=True):
+        import tools as _tl
+        p = self.selected()
+        if p is None:
+            return None
+        if really and not _tl.reveal(p):
+            QMessageBox.information(self, "Skipped Folders", f"Could not open {p}")
+        return p
+
+    def list_text(self):
+        return "\n".join(f"{p}\t{w}" for p, w in self.skipped)
+
+    def copy_list(self):
+        QApplication.clipboard().setText(self.list_text())
+
+
 class DuplicatesDialog(QDialog):
     """The duplicates found: tick the ones to deal with, then keep, set aside or delete them. Deleting only
     removes a file that is byte for byte the same as the copy that is kept."""
@@ -1209,6 +1338,11 @@ class DuplicatesDialog(QDialog):
         self.b_keep.clicked.connect(self.close)
         self.b_aside = QPushButton("Move to a Duplicates Folder")
         self.b_aside.clicked.connect(lambda: self.act(False))
+        try:
+            self.b_aside.setToolTip(f"Sets them aside in {self.owner.dup_folder()} - Undo Last Run puts them back, "
+                                    "and Open Duplicates Folder shows them")
+        except Exception:  # noqa: BLE001 - opened without the Organize window
+            pass
         self.b_delete = QPushButton("Delete Ticked Duplicates…")
         self.b_delete.clicked.connect(lambda: self.act(True))
         for b in (self.b_keep, self.b_aside, self.b_delete):

@@ -181,6 +181,8 @@ def run(cfg=None, settings=None, progress=None, now=None) -> dict:
             except OSError:
                 continue
             paths.append(p)
+        for sp, sw in list(O.SKIPPED):                       # where they are, in the log (Zip My Logs)
+            _note(f"folder not looked into on purpose: {sp} - {sw}")
         progress(f"{len(paths):,} file(s) to look at", force=True)
         items = O.plan(O.classify(paths, library=lib, layout=cfg.get("layout") or "rig", root=src,
                                   riglist=riglist, tol=tol,
