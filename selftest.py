@@ -5152,6 +5152,11 @@ def run(app, out_dir: Path) -> int:
               and (_od / "dump" / "L2.fits").exists() and "not the same file" in _owin.status.text(),
               f"Organize › Duplicates… lists {_odn} duplicates and deletes only the exact copy - the same capture "
               f"with different bytes goes to the Duplicates folder instead, undoably ({_owin.status.text()[:90]})")
+        _sk_dupdir = _owin.dup_folder()
+        check(_sk_dupdir == _odsafe.parent and str(_sk_dupdir) in _owin.status.text().replace("&amp;", "&")
+              and _owin.open_dup_folder(ask=False) is True and "Duplicates" in _owin.b_dupdir.text(),
+              f"Organize: after setting duplicates aside the summary names the Duplicates folder in full, and "
+              f"Open Duplicates Folder finds it ({_sk_dupdir})")
         _owin.go(ask=False, wait=True)
         _oleft = (_owin.table.rowCount(), "left where they are" in _owin.status.text())
         _owin.safe_to_delete(wait=True)
@@ -5171,6 +5176,27 @@ def run(app, out_dir: Path) -> int:
               f"(steps ticked off: {_osteps}; left behind and why: {_oleft}) "
               f"File › Organize My Astro Files… moves {_on} files into place (the duplicate stays put) and Undo "
               f"Last Run puts every one back ({_oback})")
+        # Skipped Folders…: a work folder Step 1 leaves alone is named in full in the summary, and listed with
+        # Open Folder / Copy List (Brian couldn't tell which folder "1 folder not looked into" meant)
+        _sk_root = session.parent / "organize_skip_test"
+        _ksh.rmtree(_sk_root, ignore_errors=True)
+        (_sk_root / "M31" / "calibrated").mkdir(parents=True)
+        _ksh.copy2(_od / "dump" / "L3.fits", _sk_root / "M31" / "L3.fits")
+        _ksh.copy2(_od / "dump" / "L3.fits", _sk_root / "M31" / "calibrated" / "L3_c.fits")
+        _owin.set_sources([_sk_root])
+        _owin.scan(wait=True)
+        _sk_txt = _owin.status.text()
+        _sk_dlg = _owin.show_skipped(wait=True)
+        _sk_rows = _sk_dlg.table.rowCount()
+        _sk_open = _sk_dlg.open_selected(really=False)
+        _sk_list = _sk_dlg.list_text()
+        _sk_dlg.close()
+        check(_owin.b_skipped.isEnabled() and str(_sk_root / "M31" / "calibrated") in _sk_txt
+              and "Skipped Folders" in _sk_txt and _sk_rows == 1 and _sk_open == _sk_root / "M31" / "calibrated"
+              and str(_sk_root / "M31" / "calibrated") in _sk_list and "PixInsight" in _sk_list
+              and not any(i.src.name == "L3_c.fits" for i in _owin.items),
+              f"Organize › Skipped Folders…: the folder not looked into is named in full with why, and listed with "
+              f"Open Folder / Copy List ({_sk_list[:90]})")
         _owin.src.setText(str(_gr))
         _owin.move.setChecked(False)
         _owin.scan(wait=True)
